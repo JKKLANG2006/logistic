@@ -135,6 +135,11 @@
   .field label{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-dim); margin-bottom:6px; }
   .field select, .field input, .field textarea{ width:100%; background:#FAF8F3; border:1px solid var(--border); color:var(--text); padding:10px 11px; border-radius:7px; font-size:13px; }
   .field textarea{ resize:vertical; min-height:50px; }
+  .combo-dropdown{ position:absolute; left:0; right:0; top:100%; margin-top:4px; background:var(--panel); border:1px solid var(--border); border-radius:8px; max-height:220px; overflow-y:auto; z-index:20; box-shadow:0 6px 18px rgba(0,0,0,0.08); }
+  .combo-item{ padding:9px 12px; font-size:13px; cursor:pointer; }
+  .combo-item:hover{ background:var(--panel-2); }
+  .combo-item.combo-new{ color:var(--amber); font-weight:600; border-top:1px solid var(--border); }
+  .combo-empty{ padding:10px 12px; font-size:12px; color:var(--text-dim); }
   .waste-grid, .action-grid, .role-grid{ display:grid; grid-template-columns: repeat(4,1fr); gap:8px; }
   .action-grid{ grid-template-columns: repeat(2,1fr); }
   .role-grid{ grid-template-columns: repeat(3,1fr); }
@@ -355,8 +360,10 @@
       </div>
     </div>
     <div class="field"><label>Trip date</label><input type="date" id="f-date"></div>
-    <div class="field"><label>Customer</label>
-      <select id="f-client"><option value="">Select customer…</option><option value="__new__">+ Add new customer…</option></select>
+    <div class="field" style="position:relative;"><label>Customer</label>
+      <input type="text" id="f-client-search" placeholder="Type to search customer…" autocomplete="off">
+      <input type="hidden" id="f-client" value="">
+      <div id="f-client-dropdown" class="combo-dropdown" style="display:none;"></div>
     </div>
     <div id="editClientToggleWrap" style="display:none; margin:-8px 0 14px;">
       <span class="clear" id="editClientToggle" style="cursor:pointer;">Edit customer details</span>
@@ -1848,8 +1855,46 @@ async function uploadTripPhoto(file){
 
 // ===== Trip modal (shared create/edit) =====
 function populateClientSelect(){
-  $('f-client').innerHTML = '<option value="">Select customer…</option>' + CLIENTS.map(c=>`<option value="${c.id}">${c.name}</option>`).join('') + '<option value="__new__">+ Add new customer…</option>';
+  $('f-client').value = '';
+  $('f-client-search').value = '';
+  $('f-client-dropdown').style.display = 'none';
 }
+function renderClientDropdown(rawText){
+  const dd = $('f-client-dropdown');
+  const q = (rawText||'').trim().toLowerCase();
+  const matches = (q ? CLIENTS.filter(c=>c.name.toLowerCase().includes(q)) : CLIENTS).slice(0, 50);
+  let html = matches.map(c => `<div class="combo-item" data-id="${c.id}" data-label="${c.name.replace(/"/g,'&quot;')}">${c.name}</div>`).join('');
+  const exactMatch = CLIENTS.some(c => c.name.toLowerCase() === q);
+  if(rawText && rawText.trim() && !exactMatch){
+    html += `<div class="combo-item combo-new" data-id="__new__" data-raw="${rawText.trim().replace(/"/g,'&quot;')}">+ Add new customer "${rawText.trim()}"</div>`;
+  } else if(!rawText || !rawText.trim()){
+    html += `<div class="combo-item combo-new" data-id="__new__" data-raw="">+ Add new customer…</div>`;
+  }
+  dd.innerHTML = html || `<div class="combo-empty">No matches</div>`;
+  dd.style.display = 'block';
+  dd.querySelectorAll('.combo-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const id = item.dataset.id;
+      if(id === '__new__'){
+        $('f-client').value = '__new__';
+        $('f-client-search').value = '';
+        if(item.dataset.raw){ $('f-newclient-name').value = item.dataset.raw; }
+      } else {
+        $('f-client').value = id;
+        $('f-client-search').value = item.dataset.label;
+      }
+      dd.style.display = 'none';
+      $('f-client').dispatchEvent(new Event('change'));
+    });
+  });
+}
+$('f-client-search').addEventListener('input', () => { $('f-client').value=''; renderClientDropdown($('f-client-search').value); });
+$('f-client-search').addEventListener('focus', () => renderClientDropdown($('f-client-search').value));
+document.addEventListener('click', (e) => {
+  if(!e.target.closest('#f-client-search') && !e.target.closest('#f-client-dropdown')){
+    $('f-client-dropdown').style.display = 'none';
+  }
+});
 function refreshSiteSelect(clientId, preselectSiteId){
   const opts = SITES.filter(s=>s.client_id===clientId);
   $('f-site').disabled = false;
@@ -1891,15 +1936,14 @@ $('saveClientEdit').addEventListener('click', async () => {
   if(error){ console.error(error); toast('Failed to update customer'); return; }
   const c = CLIENTS.find(x=>x.id===clientId);
   if(c){ c.name = update.name; c.contact_name = update.contact_name; c.contact_phone = update.contact_phone; }
-  populateClientSelect();
-  $('f-client').value = clientId;
+  $('f-client-search').value = update.name;
   await logAudit('edit_customer', name, 'Updated customer contact details');
   toast('Customer details updated');
   $('clientEditPanel').style.display = 'none';
 });
 $('f-site').addEventListener('change', () => { setNewSiteVisible($('f-site').value==='__new__'); });
 document.querySelectorAll('#f-waste .waste-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#f-waste .waste-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); newWasteSelection=opt.dataset.v; }));
-document.querySelectorAll('#f-action .action-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#f-action .action-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); newActionSelection=opt.dataset.v; }));
+document.querySelectorAll('#f-action .action-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#f-action .action-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); newActionSelection=opt.dataset.v; updateBinStatusHint(); }));
 
 function resetTripForm(){
   populateClientSelect();
@@ -1946,6 +1990,7 @@ function openTripModal(tripId){
   $('f-newclient-wrap').style.display='none'; setNewSiteVisible(false);
   $('clientEditPanel').style.display='none';
   $('f-client').value = t.client_id;
+  $('f-client-search').value = clientName(t.client_id);
   $('editClientToggleWrap').style.display = canEdit() ? 'block' : 'none';
   refreshSiteSelect(t.client_id, t.site_id);
   $('f-date').value = t.trip_date;
@@ -1980,23 +2025,36 @@ function getLatestTripForBin(binNumber, excludeTripId){
   }, null);
 }
 
-$('f-bin').addEventListener('input', () => {
+function updateBinStatusHint(){
   const hint = $('binStatusHint');
   const val = $('f-bin').value.trim();
   if(!val){ hint.style.display='none'; return; }
   const latest = getLatestTripForBin(val, editingTripId);
   if(!latest){ hint.style.display='none'; return; }
   const site = siteName(latest.site_id), client = clientName(latest.client_id);
-  if(latest.action === 'deploy'){
-    hint.style.display='block';
-    hint.style.color = 'var(--red)';
-    hint.textContent = `⚠ Currently Bin Out at ${client} — ${site} (${fmtDate(latest.trip_date)})`;
+  hint.style.display='block';
+
+  if(newActionSelection === 'deploy'){
+    if(latest.action === 'deploy'){
+      hint.style.color = 'var(--red)';
+      hint.textContent = `⚠ Already Bin Out at ${client} — ${site} (${fmtDate(latest.trip_date)}) — collect it first`;
+    } else {
+      hint.style.color = 'var(--sage)';
+      hint.textContent = `✓ Last Bin In on ${fmtDate(latest.trip_date)} — available for Bin Out`;
+    }
+  } else if(newActionSelection === 'collect'){
+    if(latest.action === 'deploy'){
+      hint.style.color = 'var(--sage)';
+      hint.textContent = `✓ Currently Bin Out at ${client} — ${site} (${fmtDate(latest.trip_date)}) — ready to collect`;
+    } else {
+      hint.style.color = 'var(--red)';
+      hint.textContent = `⚠ Already Bin In since ${fmtDate(latest.trip_date)} — not currently out`;
+    }
   } else {
-    hint.style.display='block';
-    hint.style.color = 'var(--sage)';
-    hint.textContent = `✓ Last recorded as Bin In (${fmtDate(latest.trip_date)}) — available for Bin Out`;
+    hint.style.display='none';
   }
-});
+}
+$('f-bin').addEventListener('input', updateBinStatusHint);
 
 $('saveTrip').addEventListener('click', async () => {
   if(!newActionSelection){ toast('Select deploy or collect'); return; }
