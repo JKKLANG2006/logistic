@@ -250,7 +250,7 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th>Added</th></tr></thead>
+        <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th>Added</th><th></th></tr></thead>
         <tbody id="staffBody"></tbody>
       </table>
     </div>
@@ -306,16 +306,22 @@
 <div class="overlay" id="newStaffOverlay">
   <div class="modal">
     <button class="close-x" id="closeNewStaff">✕</button>
-    <h2>Add staff account</h2>
+    <h2 id="staffModalTitle">Add staff account</h2>
     <div class="hint" id="newStaffEntityHint">Creates a login scoped to one entity only.</div>
     <div class="field"><label>Full name</label><input type="text" id="s-name"></div>
     <div class="field"><label>Username</label><input type="text" id="s-username"></div>
-    <div class="field"><label>Temporary password</label><input type="text" id="s-password"></div>
+    <div class="field"><label id="s-password-label">Temporary password</label><input type="text" id="s-password" placeholder="Leave blank to keep current password"></div>
     <div class="field"><label>Role</label>
       <div class="role-grid" id="s-role">
         <div class="role-opt sel" data-v="maker">Maker</div>
         <div class="role-opt" data-v="checker">Checker</div>
         <div class="role-opt" data-v="reviewer">Reviewer</div>
+      </div>
+    </div>
+    <div class="field" id="s-status-wrap" style="display:none;"><label>Status</label>
+      <div class="action-grid" id="s-status">
+        <div class="action-opt sel" data-v="active">Active</div>
+        <div class="action-opt" data-v="disabled">Disabled</div>
       </div>
     </div>
     <div class="modal-actions">
@@ -729,22 +735,58 @@ function renderAudit(){
 }
 
 // ===== Staff management (master admin only) =====
+let editingStaffId = null;
+
 async function renderStaff(){
   $('newStaffEntityHint').textContent = `Creates a login for ${entityName(ACTIVE_ENTITY_ID)} only.`;
-  const { data, error } = await sb.from('logistics_staff_users').select('id,name,username,role,is_active,created_at').eq('entity_id', ACTIVE_ENTITY_ID).order('created_at');
+  const { data, error } = await sb.from('logistics_staff_view').select('id,name,username,role,is_active,created_at').eq('entity_id', ACTIVE_ENTITY_ID).order('created_at');
   if(error){ console.error(error); toast('Failed to load staff'); return; }
   STAFF = data||[];
   const body = $('staffBody');
-  if(STAFF.length===0){ body.innerHTML='<tr><td colspan="5"><div class="empty-state">No staff yet for this entity</div></td></tr>'; return; }
+  if(STAFF.length===0){ body.innerHTML='<tr><td colspan="6"><div class="empty-state">No staff yet for this entity</div></td></tr>'; return; }
   body.innerHTML = STAFF.map(s => `
     <tr>
       <td>${s.name}</td><td>${s.username}</td>
       <td><span class="pill role-${s.role}">${s.role}</span></td>
       <td>${s.is_active ? 'Active' : 'Disabled'}</td>
       <td>${fmtDateTime(s.created_at)}</td>
+      <td><button class="row-btn edit" data-id="${s.id}">Edit</button></td>
     </tr>`).join('');
+  body.querySelectorAll('.row-btn.edit').forEach(btn => {
+    btn.addEventListener('click', () => openStaffModal(btn.dataset.id));
+  });
 }
+
+function openStaffModal(staffId){
+  const s = STAFF.find(x=>x.id===staffId);
+  if(!s) return;
+  editingStaffId = staffId;
+  $('staffModalTitle').textContent = 'Edit staff account';
+  $('newStaffEntityHint').textContent = `Editing login for ${entityName(ACTIVE_ENTITY_ID)}.`;
+  $('s-password-label').textContent = 'Reset password (optional)';
+  $('s-name').value = s.name;
+  $('s-username').value = s.username;
+  $('s-password').value = '';
+  newStaffRole = s.role;
+  document.querySelectorAll('#s-role .role-opt').forEach(o=>o.classList.toggle('sel', o.dataset.v===s.role));
+  $('s-status-wrap').style.display = 'block';
+  document.querySelectorAll('#s-status .action-opt').forEach(o=>o.classList.toggle('sel', (o.dataset.v==='active')===s.is_active));
+  $('saveNewStaff').textContent = 'Save changes';
+  $('newStaffOverlay').classList.add('show');
+}
+document.querySelectorAll('#s-status .action-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    document.querySelectorAll('#s-status .action-opt').forEach(o=>o.classList.remove('sel'));
+    opt.classList.add('sel');
+  });
+});
+
 $('openNewStaff').addEventListener('click', () => {
+  editingStaffId = null;
+  $('staffModalTitle').textContent = 'Add staff account';
+  $('s-password-label').textContent = 'Temporary password';
+  $('s-status-wrap').style.display = 'none';
+  $('saveNewStaff').textContent = 'Create account';
   $('s-name').value=''; $('s-username').value=''; $('s-password').value='';
   newStaffRole='maker';
   document.querySelectorAll('#s-role .role-opt').forEach(o=>o.classList.remove('sel'));
@@ -762,12 +804,25 @@ document.querySelectorAll('#s-role .role-opt').forEach(opt => {
 });
 $('saveNewStaff').addEventListener('click', async () => {
   const name = $('s-name').value.trim(), username = $('s-username').value.trim(), password = $('s-password').value;
-  if(!name||!username||!password){ toast('Fill in all fields'); return; }
+  if(!name||!username){ toast('Fill in name and username'); return; }
   if(username.toLowerCase()==='admin'){ toast('"admin" is reserved for master admin login'); return; }
-  const { data, error } = await sb.rpc('create_logistics_staff', { p_name:name, p_username:username, p_password:password, p_role:newStaffRole, p_entity_id: ACTIVE_ENTITY_ID });
-  if(error){ console.error(error); toast('Failed to create — username may already exist'); return; }
-  await logAudit('create_staff', username, `Created ${newStaffRole} account for ${name} at ${entityName(ACTIVE_ENTITY_ID)}`);
-  toast('Staff account created');
+
+  if(editingStaffId){
+    const isActive = document.querySelector('#s-status .action-opt.sel').dataset.v === 'active';
+    const { error } = await sb.rpc('update_logistics_staff', {
+      p_staff_id: editingStaffId, p_name: name, p_username: username, p_role: newStaffRole,
+      p_is_active: isActive, p_new_password: password || null
+    });
+    if(error){ console.error(error); toast('Failed to update — username may already be taken'); return; }
+    await logAudit('edit_staff', username, `Updated ${newStaffRole} account for ${name}${password?' (password reset)':''}${!isActive?' — disabled':''}`);
+    toast('Staff account updated');
+  } else {
+    if(!password){ toast('Enter a temporary password'); return; }
+    const { data, error } = await sb.rpc('create_logistics_staff', { p_name:name, p_username:username, p_password:password, p_role:newStaffRole, p_entity_id: ACTIVE_ENTITY_ID });
+    if(error){ console.error(error); toast('Failed to create — username may already exist'); return; }
+    await logAudit('create_staff', username, `Created ${newStaffRole} account for ${name} at ${entityName(ACTIVE_ENTITY_ID)}`);
+    toast('Staff account created');
+  }
   $('newStaffOverlay').classList.remove('show');
   renderStaff();
 });
