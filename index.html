@@ -9,6 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --bg: #F3F1EC; --panel: #FFFFFF; --panel-2: #F5F2EC; --border: #E1DBCF;
@@ -181,6 +182,9 @@
   <div class="tabs" id="tabs">
     <div class="tab active" data-view="log">Trip Log</div>
     <div class="tab" data-view="bins">Bin Tracker</div>
+    <div class="tab" data-view="maintenance">Maintenance</div>
+    <div class="tab" data-view="binregistry">Bins</div>
+    <div class="tab" data-view="customers" id="customersTab" style="display:none;">Customers</div>
     <div class="tab" data-view="audit" id="auditTab" style="display:none;">Audit Trail</div>
     <div class="tab" data-view="staff" id="staffTab" style="display:none;">Staff</div>
   </div>
@@ -195,25 +199,43 @@
   <div class="view active" id="view-log">
     <div class="role-note" id="roleNote"></div>
     <div class="filters">
-      <input type="date" id="filt-date" title="Filter by date">
+      <input type="text" id="filt-search" placeholder="Search customer, site, bin, lorry, driver, notes…" style="width:260px;">
+      <span class="spacer"></span>
+      <button class="btn-ghost" id="downloadTemplate">⬇ Download Excel Template</button>
+      <button class="btn-ghost" id="openImportExcel" style="display:none;">⬆ Import from Excel</button>
+      <button class="btn-ghost" id="exportPdf">Export PDF (Detailed)</button>
+      <button class="btn-ghost" id="exportSummaryPdf">Export PDF (Summary)</button>
+    </div>
+    <div class="filters">
+      <input type="date" id="filt-date-from" title="From date">
+      <span style="color:var(--text-dim); font-size:12px;">to</span>
+      <input type="date" id="filt-date-to" title="To date">
+      <span class="fchip" data-preset="today">Today</span>
+      <span class="fchip" data-preset="week">This week</span>
+      <span class="fchip" data-preset="month">This month</span>
+      <span class="fchip" data-preset="lastmonth">Last month</span>
       <select id="filt-driver"><option value="">All drivers</option></select>
       <select id="filt-client"><option value="">All customers</option></select>
       <select id="filt-site"><option value="">All sites</option></select>
       <input type="text" id="filt-lorry" placeholder="Lorry no.">
       <input type="text" id="filt-bin" placeholder="Bin no.">
       <span class="fchip active" data-action="all">All</span>
-      <span class="fchip" data-action="deploy">Deployed</span>
-      <span class="fchip" data-action="collect">Collected</span>
+      <span class="fchip" data-action="deploy">Bin Out</span>
+      <span class="fchip" data-action="collect">Bin In</span>
       <span class="clear" id="clearFilters">Clear filters</span>
-      <span class="spacer"></span>
-      <button class="btn-ghost" id="exportPdf">Export PDF</button>
+    </div>
+    <div class="filters" id="bulkBar" style="display:none;">
+      <span id="bulkCount" style="font-size:12px; color:var(--text-dim);"></span>
+      <button class="btn-ghost" id="bulkMarkReviewed">Mark selected as reviewed</button>
+      <span class="clear" id="bulkClearSelection">Clear selection</span>
     </div>
     <div id="loading" class="loading">Loading trip log…</div>
     <div class="table-wrap" id="tableWrap" style="display:none;">
       <table>
         <thead><tr>
+          <th id="selectAllTh" style="display:none;"><input type="checkbox" id="selectAllChk"></th>
           <th>Date</th><th>Customer</th><th>Site</th><th>Lorry No.</th><th>Bin No.</th>
-          <th>Driver</th><th>Waste</th><th>Action</th><th>Logged by</th><th>Reviewed</th><th></th>
+          <th>Driver</th><th>Waste</th><th>Action</th><th>Photo</th><th>Logged by</th><th>Reviewed</th><th></th>
         </tr></thead>
         <tbody id="logBody"></tbody>
       </table>
@@ -223,11 +245,55 @@
   <div class="view" id="view-bins">
     <div class="filters">
       <span class="fchip active" data-binstatus="all">All bins</span>
-      <span class="fchip" data-binstatus="deploy">Currently at site</span>
-      <span class="fchip" data-binstatus="collect">Picked up</span>
+      <span class="fchip" data-binstatus="deploy">Bin Out</span>
+      <span class="fchip" data-binstatus="collect">Bin In</span>
       <span class="fchip" data-binstatus="leakage" id="leakageChip" style="display:none;">⚠ Possible leakage (7+ days)</span>
     </div>
     <div class="bin-grid" id="binGrid"></div>
+  </div>
+
+  <div class="view" id="view-maintenance">
+    <div class="section-head">
+      <h2>Bin Maintenance</h2>
+      <button class="btn-new" id="openNewMaintenance" style="display:none;">+ Send bin for repair</button>
+    </div>
+    <div class="filters">
+      <span class="fchip active" data-mstatus="all">All</span>
+      <span class="fchip" data-mstatus="in_repair">In Repair</span>
+      <span class="fchip" data-mstatus="completed">Completed</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Bin No.</th><th>Workshop</th><th>Sent</th><th>Status</th><th>Returned</th><th>Notes</th><th>Logged by</th><th></th></tr></thead>
+        <tbody id="maintenanceBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="view" id="view-binregistry">
+    <div class="section-head">
+      <h2>Bin Registry</h2>
+      <button class="btn-new" id="openNewBin" style="display:none;">+ Register bin</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Bin No.</th><th>Waste type</th><th>Size</th><th>Current status</th><th>Notes</th><th></th></tr></thead>
+        <tbody id="binRegistryBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="view" id="view-customers">
+    <div class="section-head">
+      <h2>Customers</h2>
+      <button class="btn-new" id="openNewCustomer">+ Add customer</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Customer</th><th>Contact name</th><th>Contact phone</th><th>Sites</th><th></th></tr></thead>
+        <tbody id="customersBody"></tbody>
+      </table>
+    </div>
   </div>
 
   <div class="view" id="view-audit">
@@ -265,27 +331,34 @@
     <div class="hint" id="tripModalHint">Log a bin deployment or pickup trip.</div>
     <div class="field"><label>Action</label>
       <div class="action-grid" id="f-action">
-        <div class="action-opt" data-v="deploy">Deploy bin</div>
-        <div class="action-opt" data-v="collect">Collect bin</div>
+        <div class="action-opt" data-v="deploy">Bin Out</div>
+        <div class="action-opt" data-v="collect">Bin In</div>
       </div>
     </div>
     <div class="field"><label>Trip date</label><input type="date" id="f-date"></div>
     <div class="field"><label>Customer</label>
       <select id="f-client"><option value="">Select customer…</option><option value="__new__">+ Add new customer…</option></select>
     </div>
+    <div id="editClientToggleWrap" style="display:none; margin:-8px 0 14px;">
+      <span class="clear" id="editClientToggle" style="cursor:pointer;">Edit customer details</span>
+    </div>
+    <div id="clientEditPanel" style="display:none; background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:14px;">
+      <div class="field"><label>Customer name</label><input type="text" id="ce-name"></div>
+      <div class="field"><label>Contact name (optional)</label><input type="text" id="ce-contact"></div>
+      <div class="field"><label>Contact phone (optional)</label><input type="text" id="ce-phone"></div>
+      <button type="button" class="btn-ghost" id="saveClientEdit" style="width:100%;">Save customer details</button>
+    </div>
     <div id="f-newclient-wrap" style="display:none;">
       <div class="field"><label>New customer name</label><input type="text" id="f-newclient-name" placeholder="Company name"></div>
-      <div class="field"><label>Contact name (optional)</label><input type="text" id="f-newclient-contact" placeholder="PIC name"></div>
-      <div class="field"><label>Contact phone (optional)</label><input type="text" id="f-newclient-phone" placeholder="+60…"></div>
     </div>
     <div class="field"><label>Site</label><select id="f-site"><option value="">Select customer first…</option></select></div>
     <div id="f-newsite-wrap" style="display:none;">
       <div class="field"><label>New site name</label><input type="text" id="f-newsite-name" placeholder="e.g. Warehouse 3"></div>
-      <div class="field"><label>City (optional)</label><input type="text" id="f-newsite-city" placeholder="City"></div>
-      <div class="field"><label>State (optional)</label><input type="text" id="f-newsite-state" placeholder="State"></div>
     </div>
     <div class="field"><label>Lorry number</label><input type="text" id="f-lorry" placeholder="e.g. WXY 1234"></div>
-    <div class="field"><label>Bin number</label><input type="text" id="f-bin" placeholder="e.g. RR-014"></div>
+    <div class="field"><label>Bin number</label><input type="text" id="f-bin" placeholder="e.g. RR-014">
+      <div id="binStatusHint" style="font-size:11px; margin-top:6px; display:none;"></div>
+    </div>
     <div class="field"><label>Driver name</label><input type="text" id="f-driver" placeholder="Driver name"></div>
     <div class="field"><label>Type of waste</label>
       <div class="waste-grid" id="f-waste">
@@ -293,6 +366,17 @@
         <div class="waste-opt" data-v="plastic">Plastic</div>
         <div class="waste-opt" data-v="metal">Metal</div>
         <div class="waste-opt" data-v="general">General</div>
+      </div>
+    </div>
+    <div id="f-newsite-optional-wrap" style="display:none;">
+      <div class="field"><label>City (optional)</label><input type="text" id="f-newsite-city" placeholder="City"></div>
+      <div class="field"><label>State (optional)</label><input type="text" id="f-newsite-state" placeholder="State"></div>
+    </div>
+    <div class="field"><label>Photo (optional)</label>
+      <input type="file" id="f-photo" accept="image/*">
+      <div id="photoPreviewWrap" style="display:none; margin-top:8px;">
+        <img id="photoPreview" style="max-width:100%; max-height:140px; border-radius:8px; border:1px solid var(--border);">
+        <div style="margin-top:4px;"><span class="clear" id="removePhoto">Remove photo</span></div>
       </div>
     </div>
     <div class="field"><label>Notes (optional)</label><textarea id="f-notes" placeholder="Access instructions, contact person, etc."></textarea></div>
@@ -331,6 +415,89 @@
   </div>
 </div>
 
+<div class="overlay" id="customerOverlay">
+  <div class="modal">
+    <button class="close-x" id="closeCustomer">✕</button>
+    <h2 id="customerModalTitle">Add customer</h2>
+    <div class="hint">Full customer record for this entity.</div>
+    <div class="field"><label>Customer name</label><input type="text" id="c-name"></div>
+    <div class="field"><label>Contact name (optional)</label><input type="text" id="c-contact"></div>
+    <div class="field"><label>Contact phone (optional)</label><input type="text" id="c-phone"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelCustomer">Cancel</button>
+      <button class="btn-save" id="saveCustomer">Save customer</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="maintenanceOverlay">
+  <div class="modal">
+    <button class="close-x" id="closeMaintenance">✕</button>
+    <h2 id="maintenanceModalTitle">Send bin for repair</h2>
+    <div class="hint" id="maintenanceModalHint">Log a bin going to a maintenance hub / workshop for repair.</div>
+    <div class="field"><label>Bin number</label><input type="text" id="m-bin" placeholder="e.g. RR-014"></div>
+    <div class="field"><label>Workshop / maintenance hub</label><input type="text" id="m-workshop" placeholder="e.g. Klang Central Workshop"></div>
+    <div class="field"><label>Sent date</label><input type="date" id="m-sent-date"></div>
+    <div class="field" id="m-status-wrap" style="display:none;"><label>Status</label>
+      <div class="action-grid" id="m-status">
+        <div class="action-opt sel" data-v="in_repair">In Repair</div>
+        <div class="action-opt" data-v="completed">Completed</div>
+      </div>
+    </div>
+    <div class="field" id="m-returned-wrap" style="display:none;"><label>Returned date</label><input type="date" id="m-returned-date"></div>
+    <div class="field"><label>Notes (optional)</label><textarea id="m-notes" placeholder="Reason for repair, condition, etc."></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelMaintenance">Cancel</button>
+      <button class="btn-save" id="saveMaintenance">Send for repair</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="binRegistryOverlay">
+  <div class="modal">
+    <button class="close-x" id="closeBinRegistry">✕</button>
+    <h2 id="binRegistryModalTitle">Register bin</h2>
+    <div class="hint">Adds this bin to the master registry for this entity.</div>
+    <div class="field"><label>Bin number</label><input type="text" id="br-bin" placeholder="e.g. RR-014"></div>
+    <div class="field"><label>Waste type (optional)</label>
+      <div class="waste-grid" id="br-waste">
+        <div class="waste-opt" data-v="carton">Carton</div>
+        <div class="waste-opt" data-v="plastic">Plastic</div>
+        <div class="waste-opt" data-v="metal">Metal</div>
+        <div class="waste-opt" data-v="general">General</div>
+      </div>
+    </div>
+    <div class="field"><label>Size (optional)</label><input type="text" id="br-size" placeholder="e.g. 20 cubic yard"></div>
+    <div class="field"><label>Notes (optional)</label><textarea id="br-notes"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelBinRegistry">Cancel</button>
+      <button class="btn-save" id="saveBinRegistry">Register bin</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="importExcelOverlay">
+  <div class="modal" style="max-width:640px;">
+    <button class="close-x" id="closeImportExcel">✕</button>
+    <h2>Import trips from Excel</h2>
+    <div class="hint">Use this to log trips that were recorded offline. Upload the filled-in template — rows are previewed below before anything is saved.</div>
+    <div class="field"><input type="file" id="importFileInput" accept=".xlsx,.xls"></div>
+    <div id="importPreviewWrap" style="display:none;">
+      <div id="importSummary" style="font-size:12.5px; color:var(--text-dim); margin-bottom:10px;"></div>
+      <div class="table-wrap" style="max-height:320px; overflow-y:auto;">
+        <table>
+          <thead><tr><th>Row</th><th>Date</th><th>Action</th><th>Customer</th><th>Site</th><th>Bin No.</th><th>Waste</th><th>Status</th></tr></thead>
+          <tbody id="importPreviewBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelImportExcel">Cancel</button>
+      <button class="btn-save" id="confirmImportExcel" style="display:none;">Import valid rows</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -339,7 +506,9 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 
-let ENTITIES = [], CLIENTS = [], SITES = [], TRIPS = [], AUDIT = [], STAFF = [];
+let ENTITIES = [], CLIENTS = [], SITES = [], TRIPS = [], AUDIT = [], STAFF = [], MAINTENANCE = [];
+let filterMStatus = 'all', editingMaintenanceId = null;
+let pendingPhotoFile = null, existingPhotoUrl = null, removeExistingPhoto = false;
 let newWasteSelection=null, newActionSelection=null, newStaffRole='maker';
 let filterAction='all', filterBinStatus='all';
 let CURRENT_USER = null;
@@ -446,19 +615,53 @@ function enterApp(){
   $('roleNote').textContent = ROLE_NOTES[CURRENT_USER.role] || '';
   $('staffTab').style.display = isMaster() ? 'block' : 'none';
   $('auditTab').style.display = canSeeAudit() ? 'block' : 'none';
+  $('customersTab').style.display = canEdit() ? 'block' : 'none';
+  $('openNewBin').style.display = canEdit() ? 'inline-block' : 'none';
   $('openNew').style.display = canCreate() ? 'inline-block' : 'none';
+  $('openNewMaintenance').style.display = canCreate() ? 'inline-block' : 'none';
+  $('openImportExcel').style.display = canCreate() ? 'inline-block' : 'none';
   $('leakageChip').style.display = canSeeLeakage() ? 'inline-block' : 'none';
   renderEntitySwitcher();
   loadAll();
+  startSessionTimeout();
 }
-$('logoutBtn').addEventListener('click', async () => {
-  await logAudit('logout', CURRENT_USER.name, 'Logged out');
-  if(CURRENT_USER && CURRENT_USER.authType === 'master'){ await sb.auth.signOut(); }
+
+// ===== Session timeout (10 minutes of inactivity) =====
+const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
+let sessionTimeoutHandle = null;
+function startSessionTimeout(){
+  ['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(evt => {
+    document.addEventListener(evt, resetSessionTimeout, { passive: true });
+  });
+  resetSessionTimeout();
+}
+function resetSessionTimeout(){
+  if(!CURRENT_USER) return;
+  if(sessionTimeoutHandle) clearTimeout(sessionTimeoutHandle);
+  sessionTimeoutHandle = setTimeout(async () => {
+    await doLogout('Session timed out after 10 minutes of inactivity');
+  }, SESSION_TIMEOUT_MS);
+}
+async function doLogout(reason){
+  if(CURRENT_USER){
+    await logAudit('logout', CURRENT_USER.name, reason || 'Logged out');
+    if(CURRENT_USER.authType === 'master'){ await sb.auth.signOut(); }
+  }
   localStorage.removeItem('rr_staff_session');
   CURRENT_USER = null;
+  if(sessionTimeoutHandle) clearTimeout(sessionTimeoutHandle);
+  if(reason){ sessionStorage.setItem('rr_logout_reason', reason); }
   location.reload();
-});
+}
+
+$('logoutBtn').addEventListener('click', () => doLogout('Logged out'));
 (async function checkSession(){
+  const logoutReason = sessionStorage.getItem('rr_logout_reason');
+  if(logoutReason){
+    $('loginErr').textContent = logoutReason;
+    $('loginErr').style.color = 'var(--blue)';
+    sessionStorage.removeItem('rr_logout_reason');
+  }
   const { data: { session } } = await sb.auth.getSession();
   if(session && session.user && session.user.email){
     CURRENT_USER = { id: session.user.id, name: 'Master Admin', role: 'admin', authType: 'master', entity_id: null };
@@ -486,8 +689,11 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     $('view-' + tab.dataset.view).classList.add('active');
     if(tab.dataset.view === 'bins') { await loadLeakageAcks(); renderBins(); }
+    if(tab.dataset.view === 'maintenance') { await loadMaintenance(); renderMaintenance(); }
     if(tab.dataset.view === 'audit') renderAudit();
     if(tab.dataset.view === 'staff') renderStaff();
+    if(tab.dataset.view === 'customers') renderCustomers();
+    if(tab.dataset.view === 'binregistry') { await loadBinRegistry(); renderBinRegistry(); }
   });
 });
 
@@ -495,21 +701,25 @@ document.querySelectorAll('.tab').forEach(tab => {
 async function loadAll(){
   if(!ACTIVE_ENTITY_ID){ toast('No entity selected'); return; }
   const queries = [
-    sb.from('logistics_clients').select('id,name').eq('entity_id', ACTIVE_ENTITY_ID).order('name'),
+    sb.from('logistics_clients').select('id,name,contact_name,contact_phone').eq('entity_id', ACTIVE_ENTITY_ID).order('name'),
     sb.from('logistics_sites').select('id,client_id,site_name,city,state').eq('entity_id', ACTIVE_ENTITY_ID),
-    sb.from('trip_log').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('trip_date', {ascending:false}).order('created_at', {ascending:false})
+    sb.from('trip_log').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('trip_date', {ascending:false}).order('created_at', {ascending:false}),
+    sb.from('bin_maintenance').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('sent_date', {ascending:false}).order('created_at', {ascending:false})
   ];
   if(canSeeAudit()) queries.push(sb.from('logistics_audit_logs').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('created_at', {ascending:false}).limit(300));
   const results = await Promise.all(queries);
-  const [{data: clients, error: ce}, {data: sites, error: se}, {data: trips, error: te}] = results;
-  if(ce||se||te){ console.error(ce,se,te); toast('Error loading data — check console'); return; }
-  CLIENTS = clients||[]; SITES = sites||[]; TRIPS = trips||[];
-  if(canSeeAudit()){ const ares = results[3]; if(ares.error){ console.error(ares.error); } AUDIT = ares.data||[]; }
+  const [{data: clients, error: ce}, {data: sites, error: se}, {data: trips, error: te}, {data: maint, error: me}] = results;
+  if(ce||se||te||me){ console.error(ce,se,te,me); toast('Error loading data — check console'); return; }
+  CLIENTS = clients||[]; SITES = sites||[]; TRIPS = trips||[]; MAINTENANCE = maint||[];
+  if(canSeeAudit()){ const ares = results[4]; if(ares.error){ console.error(ares.error); } AUDIT = ares.data||[]; }
   populateFilterSelects();
   renderLog();
   if($('view-bins').classList.contains('active')) { await loadLeakageAcks(); renderBins(); }
   if($('view-audit').classList.contains('active')) renderAudit();
   if($('view-staff').classList.contains('active')) renderStaff();
+  if($('view-customers').classList.contains('active')) renderCustomers();
+  if($('view-binregistry').classList.contains('active')) { await loadBinRegistry(); renderBinRegistry(); }
+  if($('view-maintenance').classList.contains('active')) { await loadMaintenance(); renderMaintenance(); }
 }
 
 function populateFilterSelects(){
@@ -528,32 +738,72 @@ function populateFilterSelects(){
 }
 
 function getFilteredRows(){
-  const dateFilter = $('filt-date').value, driverFilter = $('filt-driver').value, clientFilter = $('filt-client').value;
+  const dateFrom = $('filt-date-from').value, dateTo = $('filt-date-to').value;
+  const driverFilter = $('filt-driver').value, clientFilter = $('filt-client').value;
   const siteFilter = $('filt-site').value, lorryFilter = $('filt-lorry').value.trim().toLowerCase(), binFilter = $('filt-bin').value.trim().toLowerCase();
+  const search = $('filt-search').value.trim().toLowerCase();
   return TRIPS.filter(t => {
-    if(dateFilter && t.trip_date !== dateFilter) return false;
+    if(dateFrom && t.trip_date < dateFrom) return false;
+    if(dateTo && t.trip_date > dateTo) return false;
     if(driverFilter && t.driver_name !== driverFilter) return false;
     if(clientFilter && t.client_id !== clientFilter) return false;
     if(siteFilter && t.site_id !== siteFilter) return false;
     if(lorryFilter && !(t.lorry_number||'').toLowerCase().includes(lorryFilter)) return false;
     if(binFilter && !(t.bin_number||'').toLowerCase().includes(binFilter)) return false;
     if(filterAction !== 'all' && t.action !== filterAction) return false;
+    if(search){
+      const haystack = [
+        clientName(t.client_id), siteName(t.site_id), t.bin_number, t.lorry_number, t.driver_name, t.notes
+      ].filter(Boolean).join(' ').toLowerCase();
+      if(!haystack.includes(search)) return false;
+    }
     return true;
   });
 }
+
+function applyDatePreset(preset){
+  const now = new Date();
+  const iso = (d) => d.toISOString().slice(0,10);
+  let from, to;
+  if(preset === 'today'){ from = to = iso(now); }
+  else if(preset === 'week'){
+    const day = now.getDay() === 0 ? 6 : now.getDay()-1; // Monday start
+    const monday = new Date(now); monday.setDate(now.getDate()-day);
+    from = iso(monday); to = iso(now);
+  } else if(preset === 'month'){
+    from = iso(new Date(now.getFullYear(), now.getMonth(), 1)); to = iso(now);
+  } else if(preset === 'lastmonth'){
+    from = iso(new Date(now.getFullYear(), now.getMonth()-1, 1));
+    to = iso(new Date(now.getFullYear(), now.getMonth(), 0));
+  }
+  $('filt-date-from').value = from; $('filt-date-to').value = to;
+  renderLog();
+}
+document.querySelectorAll('[data-preset]').forEach(chip => {
+  chip.addEventListener('click', () => applyDatePreset(chip.dataset.preset));
+});
+$('filt-search').addEventListener('input', renderLog);
+
+let selectedTripIds = new Set();
 
 function renderLog(){
   $('loading').style.display = 'none';
   $('tableWrap').style.display = 'block';
   const rows = getFilteredRows();
   const body = $('logBody');
-  if(rows.length === 0){ body.innerHTML = '<tr><td colspan="11"><div class="empty-state">No trips match these filters</div></td></tr>'; return; }
+  const showBulk = canReviewToggle();
+  $('selectAllTh').style.display = showBulk ? 'table-cell' : 'none';
+
+  if(rows.length === 0){ body.innerHTML = `<tr><td colspan="12"><div class="empty-state">No trips match these filters</div></td></tr>`; updateBulkBar(); return; }
   body.innerHTML = rows.map(t => {
     let actionsHtml = '';
     if(canEdit()) actionsHtml += `<button class="row-btn edit" data-id="${t.id}">Edit</button>`;
     if(canDelete()) actionsHtml += `<button class="row-btn del" data-id="${t.id}">Delete</button>`;
+    const photoCell = t.photo_url ? `<a href="${t.photo_url}" target="_blank" rel="noopener">📷 View</a>` : '—';
+    const checkCell = showBulk ? `<td><input type="checkbox" class="row-chk" data-id="${t.id}" ${selectedTripIds.has(t.id)?'checked':''}></td>` : '';
     return `
     <tr>
+      ${showBulk ? checkCell : ''}
       <td>${fmtDate(t.trip_date)}</td>
       <td>${clientName(t.client_id)}</td>
       <td>${siteName(t.site_id)}</td>
@@ -561,7 +811,8 @@ function renderLog(){
       <td>${t.bin_number}</td>
       <td>${t.driver_name || '—'}</td>
       <td><span class="waste-dot ${t.waste_type}"></span>${t.waste_type}</td>
-      <td><span class="pill ${t.action}">${t.action==='deploy'?'Deployed':'Collected'}</span></td>
+      <td><span class="pill ${t.action}">${t.action==='deploy'?'Bin Out':'Bin In'}</span></td>
+      <td>${photoCell}</td>
       <td>${t.logged_by || '—'}</td>
       <td>${canReviewToggle()
         ? `<button class="review-toggle ${t.reviewed?'on':''}" data-id="${t.id}" data-reviewed="${t.reviewed}">${t.reviewed?'✓ Reviewed':'Mark reviewed'}</button>`
@@ -596,8 +847,42 @@ function renderLog(){
       await loadAll();
     });
   });
+  body.querySelectorAll('.row-chk').forEach(chk => {
+    chk.addEventListener('change', () => {
+      if(chk.checked) selectedTripIds.add(chk.dataset.id); else selectedTripIds.delete(chk.dataset.id);
+      updateBulkBar();
+    });
+  });
+  updateBulkBar();
 }
-['filt-date','filt-driver','filt-client','filt-site'].forEach(id => $(id).addEventListener('change', renderLog));
+
+function updateBulkBar(){
+  const bar = $('bulkBar');
+  if(!canReviewToggle() || selectedTripIds.size === 0){ bar.style.display = 'none'; return; }
+  bar.style.display = 'flex';
+  $('bulkCount').textContent = `${selectedTripIds.size} selected`;
+}
+$('selectAllChk') && $('selectAllChk').addEventListener('change', (e) => {
+  const rows = getFilteredRows();
+  if(e.target.checked){ rows.forEach(t => selectedTripIds.add(t.id)); }
+  else { rows.forEach(t => selectedTripIds.delete(t.id)); }
+  renderLog();
+});
+$('bulkClearSelection').addEventListener('click', () => { selectedTripIds.clear(); renderLog(); });
+$('bulkMarkReviewed').addEventListener('click', async () => {
+  if(selectedTripIds.size === 0) return;
+  const ids = Array.from(selectedTripIds);
+  const { error } = await sb.from('trip_log').update({
+    reviewed: true, reviewed_by: CURRENT_USER.name, reviewed_at: new Date().toISOString()
+  }).in('id', ids);
+  if(error){ console.error(error); toast('Failed to bulk update'); return; }
+  await logAudit('bulk_mark_reviewed', `${ids.length} trips`, `Bulk marked ${ids.length} trip(s) as reviewed`);
+  toast(`${ids.length} trip(s) marked as reviewed`);
+  selectedTripIds.clear();
+  await loadAll();
+});
+
+['filt-date-from','filt-date-to','filt-driver','filt-client','filt-site'].forEach(id => $(id).addEventListener('change', renderLog));
 ['filt-lorry','filt-bin'].forEach(id => $(id).addEventListener('input', renderLog));
 document.querySelectorAll('[data-action]').forEach(chip => {
   chip.addEventListener('click', () => {
@@ -606,12 +891,22 @@ document.querySelectorAll('[data-action]').forEach(chip => {
   });
 });
 $('clearFilters').addEventListener('click', () => {
-  $('filt-date').value=''; $('filt-driver').value=''; $('filt-client').value=''; $('filt-site').value=''; $('filt-lorry').value=''; $('filt-bin').value='';
+  $('filt-date-from').value=''; $('filt-date-to').value=''; $('filt-driver').value=''; $('filt-client').value=''; $('filt-site').value=''; $('filt-lorry').value=''; $('filt-bin').value=''; $('filt-search').value='';
   filterAction='all';
   document.querySelectorAll('[data-action]').forEach(c=>c.classList.remove('active'));
   document.querySelector('[data-action="all"]').classList.add('active');
+  selectedTripIds.clear();
   renderLog();
 });
+
+function dateRangeLabel(){
+  const from = $('filt-date-from').value, to = $('filt-date-to').value;
+  if(from && to && from === to) return `Date: ${fmtDate(from)}`;
+  if(from && to) return `Date range: ${fmtDate(from)} – ${fmtDate(to)}`;
+  if(from) return `From: ${fmtDate(from)}`;
+  if(to) return `Up to: ${fmtDate(to)}`;
+  return `All dates · Generated ${fmtDateTime(new Date().toISOString())}`;
+}
 
 // ===== PDF export (trip log) =====
 $('exportPdf').addEventListener('click', async () => {
@@ -622,16 +917,78 @@ $('exportPdf').addEventListener('click', async () => {
   doc.setFontSize(14);
   doc.text(entityName(ACTIVE_ENTITY_ID) + ' — Daily Trip List', 14, 16);
   doc.setFontSize(9);
-  const dateFilter = $('filt-date').value;
-  doc.text(dateFilter ? `Date: ${fmtDate(dateFilter)}` : `All dates · Generated ${fmtDateTime(new Date().toISOString())}`, 14, 22);
+  doc.text(dateRangeLabel(), 14, 22);
   const body = rows.map(t => [
     fmtDate(t.trip_date), clientName(t.client_id), siteName(t.site_id),
     t.lorry_number||'—', t.bin_number, t.driver_name||'—', t.waste_type,
-    t.action==='deploy'?'Deployed':'Collected', t.logged_by||'—', t.reviewed?'Yes':'No'
+    t.action==='deploy'?'Bin Out':'Bin In', t.logged_by||'—', t.reviewed?'Yes':'No'
   ]);
   doc.autoTable({ startY: 28, head: [['Date','Customer','Site','Lorry No.','Bin No.','Driver','Waste','Action','Logged by','Reviewed']], body, styles:{fontSize:8}, headStyles:{fillColor:[30,36,41]} });
   window.open(doc.output('bloburl'), '_blank');
-  await logAudit('export_pdf', dateFilter || 'all dates', `Exported ${rows.length} trip record(s) to PDF`);
+  await logAudit('export_pdf', dateRangeLabel(), `Exported ${rows.length} trip record(s) to PDF`);
+});
+
+// ===== PDF export (summary / aggregate report) =====
+$('exportSummaryPdf').addEventListener('click', async () => {
+  const rows = getFilteredRows();
+  if(rows.length === 0){ toast('No trips to export with current filters'); return; }
+
+  const count = (arr, keyFn) => {
+    const m = {};
+    arr.forEach(r => { const k = keyFn(r) || '—'; m[k] = (m[k]||0) + 1; });
+    return Object.entries(m).sort((a,b) => b[1]-a[1]);
+  };
+
+  const deployed = rows.filter(r=>r.action==='deploy').length;
+  const collected = rows.filter(r=>r.action==='collect').length;
+  const reviewedCount = rows.filter(r=>r.reviewed).length;
+  const uniqueBins = new Set(rows.map(r=>r.bin_number)).size;
+  const byWaste = count(rows, r=>r.waste_type);
+  const byCustomer = count(rows, r=>clientName(r.client_id));
+  const bySite = count(rows, r=>siteName(r.site_id));
+  const byDriver = count(rows, r=>r.driver_name);
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait' });
+
+  doc.setFontSize(14);
+  doc.text(entityName(ACTIVE_ENTITY_ID) + ' — Trip Summary Report', 14, 16);
+  doc.setFontSize(9);
+  doc.text(dateRangeLabel(), 14, 22);
+
+  doc.autoTable({
+    startY: 28,
+    head: [['Overview','']],
+    body: [
+      ['Total trip entries', rows.length],
+      ['Bin Out', deployed],
+      ['Bin In', collected],
+      ['Unique bins involved', uniqueBins],
+      ['Reviewed', `${reviewedCount} / ${rows.length}`]
+    ],
+    styles:{fontSize:9}, headStyles:{fillColor:[30,36,41]}
+  });
+
+  let y = doc.lastAutoTable.finalY + 10;
+  doc.setFontSize(11); doc.text('By waste type', 14, y); y += 4;
+  doc.autoTable({ startY: y, head: [['Waste type','Trips']], body: byWaste, styles:{fontSize:9}, headStyles:{fillColor:[30,36,41]} });
+
+  y = doc.lastAutoTable.finalY + 10;
+  doc.setFontSize(11); doc.text('By customer', 14, y); y += 4;
+  doc.autoTable({ startY: y, head: [['Customer','Trips']], body: byCustomer, styles:{fontSize:9}, headStyles:{fillColor:[30,36,41]} });
+
+  y = doc.lastAutoTable.finalY + 10;
+  if(y > 250){ doc.addPage(); y = 20; }
+  doc.setFontSize(11); doc.text('By site', 14, y); y += 4;
+  doc.autoTable({ startY: y, head: [['Site','Trips']], body: bySite, styles:{fontSize:9}, headStyles:{fillColor:[30,36,41]} });
+
+  y = doc.lastAutoTable.finalY + 10;
+  if(y > 250){ doc.addPage(); y = 20; }
+  doc.setFontSize(11); doc.text('By driver', 14, y); y += 4;
+  doc.autoTable({ startY: y, head: [['Driver','Trips']], body: byDriver, styles:{fontSize:9}, headStyles:{fillColor:[30,36,41]} });
+
+  window.open(doc.output('bloburl'), '_blank');
+  await logAudit('export_summary_pdf', dateRangeLabel(), `Exported summary report covering ${rows.length} trip record(s)`);
 });
 
 // ===== PDF export (audit trail — master admin only) =====
@@ -685,14 +1042,17 @@ function renderBins(){
 
   const grid = $('binGrid');
   if(bins.length===0){ grid.innerHTML='<div class="empty-state">No bins match this view</div>'; return; }
+  const inRepair = openBinRepairs();
   grid.innerHTML = bins.map(b => {
     const ds = daysSince(b.trip_date);
     const ack = lastAckFor(b.bin_number);
+    const repair = inRepair[b.bin_number];
     return `
     <div class="bin-card ${b._isLeaking?'leaking':''}" data-waste="${b.waste_type}">
       <div class="bnum">${b.bin_number}</div>
-      <div class="status"><span class="pill ${b.action}">${b.action==='deploy'?'At site':'Picked up'}</span></div>
+      <div class="status"><span class="pill ${b.action}">${b.action==='deploy'?'Bin Out':'Bin In'}</span></div>
       ${b._isLeaking ? `<div class="leak-badge">⚠ ${ds} days at site</div>` : ''}
+      ${repair ? `<div class="leak-badge" style="color:var(--violet); background:rgba(110,95,199,0.12);">🔧 In repair at ${repair.workshop_name} since ${fmtDate(repair.sent_date)}</div>` : ''}
       <div class="meta"><b>${clientName(b.client_id)}</b><br>${siteName(b.site_id)}<br>
       <span class="waste-dot ${b.waste_type}"></span>${b.waste_type}<br>
       Last trip: ${fmtDate(b.trip_date)}${b.driver_name?' · '+b.driver_name:''}</div>
@@ -837,6 +1197,470 @@ $('saveNewStaff').addEventListener('click', async () => {
   renderStaff();
 });
 
+// ===== Customers (full detail management, master admin + checker) =====
+let editingCustomerId = null;
+
+function renderCustomers(){
+  const body = $('customersBody');
+  const sorted = [...CLIENTS].sort((a,b) => a.name.localeCompare(b.name));
+  if(sorted.length===0){ body.innerHTML='<tr><td colspan="5"><div class="empty-state">No customers yet for this entity</div></td></tr>'; return; }
+  body.innerHTML = sorted.map(c => {
+    const siteCount = SITES.filter(s=>s.client_id===c.id).length;
+    return `
+    <tr>
+      <td>${c.name}</td>
+      <td>${c.contact_name || '—'}</td>
+      <td>${c.contact_phone || '—'}</td>
+      <td>${siteCount}</td>
+      <td><button class="row-btn edit" data-id="${c.id}">Edit</button></td>
+    </tr>`;
+  }).join('');
+  body.querySelectorAll('.row-btn.edit').forEach(btn => {
+    btn.addEventListener('click', () => openCustomerModal(btn.dataset.id));
+  });
+}
+
+function openCustomerModal(customerId){
+  const c = customerId ? CLIENTS.find(x=>x.id===customerId) : null;
+  editingCustomerId = customerId || null;
+  $('customerModalTitle').textContent = c ? 'Edit customer' : 'Add customer';
+  $('c-name').value = c ? c.name : '';
+  $('c-contact').value = c ? (c.contact_name||'') : '';
+  $('c-phone').value = c ? (c.contact_phone||'') : '';
+  $('saveCustomer').textContent = c ? 'Save changes' : 'Save customer';
+  $('customerOverlay').classList.add('show');
+}
+$('openNewCustomer').addEventListener('click', () => openCustomerModal(null));
+$('closeCustomer').addEventListener('click', () => $('customerOverlay').classList.remove('show'));
+$('cancelCustomer').addEventListener('click', () => $('customerOverlay').classList.remove('show'));
+$('saveCustomer').addEventListener('click', async () => {
+  const name = $('c-name').value.trim();
+  if(!name){ toast('Customer name is required'); return; }
+  const payload = { name, contact_name: $('c-contact').value || null, contact_phone: $('c-phone').value || null };
+
+  if(editingCustomerId){
+    const { error } = await sb.from('logistics_clients').update(payload).eq('id', editingCustomerId);
+    if(error){ console.error(error); toast('Failed to update customer'); return; }
+    const c = CLIENTS.find(x=>x.id===editingCustomerId);
+    if(c) Object.assign(c, payload);
+    await logAudit('edit_customer', name, 'Updated customer details via Customers toolbar');
+    toast('Customer updated');
+  } else {
+    const { data, error } = await sb.from('logistics_clients').insert({ ...payload, entity_id: ACTIVE_ENTITY_ID }).select().single();
+    if(error){ console.error(error); toast('Failed to add customer'); return; }
+    CLIENTS.push(data);
+    await logAudit('create_customer', name, 'Added customer via Customers toolbar');
+    toast('Customer added');
+  }
+  $('customerOverlay').classList.remove('show');
+  renderCustomers();
+});
+
+// ===== Excel template download + offline bulk import =====
+const IMPORT_HEADERS = ['Trip Date (YYYY-MM-DD)','Action (Bin Out / Bin In)','Customer Name','Site Name','Lorry Number','Bin Number','Driver Name','Waste Type (Carton/Plastic/Metal/General)','Notes'];
+
+$('downloadTemplate').addEventListener('click', () => {
+  const exampleRow = [todayISO(), 'Bin Out', 'Radams Enterprise', 'Klang Utama', 'WXY 1234', 'RR-014', 'Rabbani', 'Carton', 'Optional notes'];
+  const ws = XLSX.utils.aoa_to_sheet([IMPORT_HEADERS, exampleRow]);
+  ws['!cols'] = IMPORT_HEADERS.map(() => ({ wch: 24 }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Trip Log');
+  const notesWs = XLSX.utils.aoa_to_sheet([
+    ['Instructions'],
+    ['1. Fill one row per trip. Keep the header row as-is.'],
+    ['2. Trip Date must be in YYYY-MM-DD format, e.g. 2026-08-26.'],
+    ['3. Action must be exactly "Bin Out" or "Bin In".'],
+    ['4. Waste Type must be exactly Carton, Plastic, Metal, or General.'],
+    ['5. Customer Name and Site Name are matched to existing records if they already exist, or created automatically if not.'],
+    ['6. Bin Number is required. Lorry Number, Driver Name and Notes are optional.'],
+    ['7. Save this file and upload it via "Import from Excel" once you have signal.']
+  ]);
+  notesWs['!cols'] = [{ wch: 90 }];
+  XLSX.utils.book_append_sheet(wb, notesWs, 'Instructions');
+  XLSX.writeFile(wb, `trip-log-template-${entityName(ACTIVE_ENTITY_ID).replace(/\s+/g,'-')}.xlsx`);
+});
+
+let parsedImportRows = [];
+
+$('openImportExcel').addEventListener('click', () => {
+  $('importFileInput').value = '';
+  $('importPreviewWrap').style.display = 'none';
+  $('confirmImportExcel').style.display = 'none';
+  parsedImportRows = [];
+  $('importExcelOverlay').classList.add('show');
+});
+$('closeImportExcel').addEventListener('click', () => $('importExcelOverlay').classList.remove('show'));
+$('cancelImportExcel').addEventListener('click', () => $('importExcelOverlay').classList.remove('show'));
+
+function normalizeAction(v){
+  const s = String(v||'').trim().toLowerCase();
+  if(s === 'bin out' || s === 'deploy') return 'deploy';
+  if(s === 'bin in' || s === 'collect') return 'collect';
+  return null;
+}
+function normalizeWaste(v){
+  const s = String(v||'').trim().toLowerCase();
+  if(['carton','plastic','metal','general'].includes(s)) return s;
+  return null;
+}
+function normalizeDate(v){
+  if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+  const s = String(v||'').trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if(!isNaN(d)) return d.toISOString().slice(0,10);
+  return null;
+}
+
+$('importFileInput').addEventListener('change', async () => {
+  const file = $('importFileInput').files[0];
+  if(!file) return;
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  const sheetName = wb.SheetNames.find(n => n.toLowerCase().includes('trip')) || wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, dateNF: 'yyyy-mm-dd' });
+
+  const dataRows = rows.slice(1).filter(r => r.some(c => c !== undefined && String(c).trim() !== ''));
+  parsedImportRows = dataRows.map((r, idx) => {
+    const rawDate = r[0], rawAction = r[1], custName = (r[2]||'').toString().trim(), siteNm = (r[3]||'').toString().trim(),
+          lorry = (r[4]||'').toString().trim(), bin = (r[5]||'').toString().trim(), driver = (r[6]||'').toString().trim(),
+          rawWaste = r[7], notes = (r[8]||'').toString().trim();
+
+    const errors = [];
+    const tripDate = normalizeDate(rawDate); if(!tripDate) errors.push('Invalid/missing date');
+    const action = normalizeAction(rawAction); if(!action) errors.push('Action must be "Bin Out" or "Bin In"');
+    if(!custName) errors.push('Customer name required');
+    if(!siteNm) errors.push('Site name required');
+    if(!bin) errors.push('Bin number required');
+    const waste = normalizeWaste(rawWaste); if(!waste) errors.push('Waste type must be Carton/Plastic/Metal/General');
+
+    return { rowNum: idx+2, tripDate, action, custName, siteNm, lorry, bin, driver, waste, notes, errors };
+  });
+
+  renderImportPreview();
+});
+
+function renderImportPreview(){
+  $('importPreviewWrap').style.display = 'block';
+  const valid = parsedImportRows.filter(r=>r.errors.length===0).length;
+  const invalid = parsedImportRows.length - valid;
+  $('importSummary').textContent = `${parsedImportRows.length} row(s) found — ${valid} ready to import${invalid ? `, ${invalid} with errors (will be skipped)` : ''}.`;
+  $('confirmImportExcel').style.display = valid > 0 ? 'inline-block' : 'none';
+
+  $('importPreviewBody').innerHTML = parsedImportRows.map(r => `
+    <tr>
+      <td>${r.rowNum}</td>
+      <td>${r.tripDate || '—'}</td>
+      <td>${r.action ? (r.action==='deploy'?'Bin Out':'Bin In') : '—'}</td>
+      <td>${r.custName || '—'}</td>
+      <td>${r.siteNm || '—'}</td>
+      <td>${r.bin || '—'}</td>
+      <td>${r.waste || '—'}</td>
+      <td>${r.errors.length ? `<span class="pill" style="color:var(--red); background:rgba(196,68,31,0.12);">${r.errors.join('; ')}</span>` : `<span class="pill reviewed-yes">OK</span>`}</td>
+    </tr>`).join('');
+}
+
+$('confirmImportExcel').addEventListener('click', async () => {
+  const validRows = parsedImportRows.filter(r=>r.errors.length===0);
+  if(validRows.length === 0) return;
+  $('confirmImportExcel').disabled = true;
+  $('confirmImportExcel').textContent = 'Importing…';
+
+  let imported = 0, failed = 0;
+  for(const r of validRows){
+    let client = CLIENTS.find(c => c.name.toLowerCase() === r.custName.toLowerCase());
+    if(!client){
+      const { data, error } = await sb.from('logistics_clients').insert({ name: r.custName, entity_id: ACTIVE_ENTITY_ID }).select().single();
+      if(error){ failed++; continue; }
+      client = data; CLIENTS.push(client);
+    }
+    let site = SITES.find(s => s.client_id === client.id && s.site_name.toLowerCase() === r.siteNm.toLowerCase());
+    if(!site){
+      const { data, error } = await sb.from('logistics_sites').insert({ client_id: client.id, site_name: r.siteNm, entity_id: ACTIVE_ENTITY_ID }).select().single();
+      if(error){ failed++; continue; }
+      site = data; SITES.push(site);
+    }
+    const { error: tripErr } = await sb.from('trip_log').insert({
+      trip_date: r.tripDate, client_id: client.id, site_id: site.id,
+      lorry_number: r.lorry || null, bin_number: r.bin, driver_name: r.driver || null,
+      waste_type: r.waste, action: r.action, notes: r.notes || null,
+      logged_by: CURRENT_USER ? CURRENT_USER.name + ' (Excel import)' : null, entity_id: ACTIVE_ENTITY_ID
+    });
+    if(tripErr){ failed++; } else { imported++; }
+  }
+
+  await logAudit('import_excel', `${imported} trip(s)`, `Bulk imported ${imported} trip(s) from Excel${failed?`, ${failed} failed`:''}`);
+  toast(`Imported ${imported} trip(s)${failed ? `, ${failed} failed` : ''}`);
+  $('confirmImportExcel').disabled = false;
+  $('confirmImportExcel').textContent = 'Import valid rows';
+  $('importExcelOverlay').classList.remove('show');
+  await loadAll();
+});
+
+// ===== Bin Registry (master list) =====
+let BIN_REGISTRY = [];
+let newBinWaste = null;
+let editingBinRegistryId = null;
+
+async function loadBinRegistry(){
+  const { data, error } = await sb.from('bin_registry').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('bin_number');
+  if(error){ console.error(error); return; }
+  BIN_REGISTRY = data || [];
+}
+
+function currentBinStatusLabel(binNumber){
+  const latest = getLatestTripForBin(binNumber, null);
+  const repair = openBinRepairs()[binNumber];
+  if(repair) return `<span class="pill deploy" style="background:rgba(110,95,199,0.12); color:var(--violet);">In Repair</span>`;
+  if(!latest) return `<span class="pill reviewed-no">Never used</span>`;
+  return `<span class="pill ${latest.action}">${latest.action==='deploy'?'Bin Out':'Bin In'}</span>`;
+}
+
+function renderBinRegistry(){
+  const body = $('binRegistryBody');
+  if(BIN_REGISTRY.length===0){ body.innerHTML='<tr><td colspan="6"><div class="empty-state">No bins registered yet</div></td></tr>'; return; }
+  body.innerHTML = BIN_REGISTRY.map(b => `
+    <tr>
+      <td>${b.bin_number}</td>
+      <td>${b.waste_type ? `<span class="waste-dot ${b.waste_type}"></span>${b.waste_type}` : '—'}</td>
+      <td>${b.bin_size || '—'}</td>
+      <td>${currentBinStatusLabel(b.bin_number)}</td>
+      <td>${b.notes || '—'}</td>
+      <td>${canEdit() ? `<button class="row-btn edit" data-id="${b.id}">Edit</button>` : ''}${canDelete() ? `<button class="row-btn del" data-id="${b.id}">Delete</button>` : ''}</td>
+    </tr>`).join('');
+  body.querySelectorAll('.row-btn.edit').forEach(btn => btn.addEventListener('click', () => openBinRegistryModal(btn.dataset.id)));
+  body.querySelectorAll('.row-btn.del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const rec = BIN_REGISTRY.find(x=>x.id===btn.dataset.id);
+      if(!confirm(`Remove bin ${rec.bin_number} from the registry? This does not affect its trip history.`)) return;
+      const { error } = await sb.from('bin_registry').delete().eq('id', btn.dataset.id);
+      if(error){ console.error(error); toast('Failed to delete'); return; }
+      await logAudit('delete_bin_registry', rec.bin_number, 'Removed bin from registry');
+      toast('Bin removed from registry');
+      await loadBinRegistry(); renderBinRegistry();
+    });
+  });
+}
+
+function openBinRegistryModal(id){
+  const b = id ? BIN_REGISTRY.find(x=>x.id===id) : null;
+  editingBinRegistryId = id || null;
+  $('binRegistryModalTitle').textContent = b ? 'Edit bin' : 'Register bin';
+  $('br-bin').value = b ? b.bin_number : '';
+  $('br-size').value = b ? (b.bin_size||'') : '';
+  $('br-notes').value = b ? (b.notes||'') : '';
+  newBinWaste = b ? b.waste_type : null;
+  document.querySelectorAll('#br-waste .waste-opt').forEach(o=>o.classList.toggle('sel', o.dataset.v===newBinWaste));
+  $('saveBinRegistry').textContent = b ? 'Save changes' : 'Register bin';
+  $('binRegistryOverlay').classList.add('show');
+}
+document.querySelectorAll('#br-waste .waste-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    document.querySelectorAll('#br-waste .waste-opt').forEach(o=>o.classList.remove('sel'));
+    opt.classList.add('sel'); newBinWaste = opt.dataset.v;
+  });
+});
+$('openNewBin').addEventListener('click', () => openBinRegistryModal(null));
+$('closeBinRegistry').addEventListener('click', () => $('binRegistryOverlay').classList.remove('show'));
+$('cancelBinRegistry').addEventListener('click', () => $('binRegistryOverlay').classList.remove('show'));
+$('saveBinRegistry').addEventListener('click', async () => {
+  const binNumber = $('br-bin').value.trim();
+  if(!binNumber){ toast('Enter the bin number'); return; }
+
+  const dupe = BIN_REGISTRY.find(b => b.bin_number.toLowerCase()===binNumber.toLowerCase() && b.id !== editingBinRegistryId);
+  if(dupe){ toast(`Bin ${binNumber} is already registered — duplicate bin numbers aren't allowed`); return; }
+
+  const payload = { bin_number: binNumber, waste_type: newBinWaste, bin_size: $('br-size').value||null, notes: $('br-notes').value||null };
+  if(editingBinRegistryId){
+    const { error } = await sb.from('bin_registry').update(payload).eq('id', editingBinRegistryId);
+    if(error){ console.error(error); toast(error.message.includes('duplicate') ? `Bin ${binNumber} already registered` : 'Failed to update bin'); return; }
+    await logAudit('edit_bin_registry', binNumber, 'Updated bin registry entry');
+    toast('Bin updated');
+  } else {
+    const { error } = await sb.from('bin_registry').insert({ ...payload, entity_id: ACTIVE_ENTITY_ID });
+    if(error){ console.error(error); toast(error.message.includes('duplicate') ? `Bin ${binNumber} already registered` : 'Failed to register bin'); return; }
+    await logAudit('register_bin', binNumber, 'Added bin to registry');
+    toast('Bin registered');
+  }
+  $('binRegistryOverlay').classList.remove('show');
+  await loadBinRegistry(); renderBinRegistry();
+});
+
+// ===== Bin Maintenance =====
+async function loadMaintenance(){
+  const { data, error } = await sb.from('bin_maintenance').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('sent_date', {ascending:false}).order('created_at', {ascending:false});
+  if(error){ console.error(error); toast('Failed to load maintenance records'); return; }
+  MAINTENANCE = data || [];
+}
+
+function openBinRepairs(){
+  // bins currently in_repair, for cross-reference in Bin Tracker
+  const open = {};
+  MAINTENANCE.filter(m=>m.status==='in_repair').forEach(m => { open[m.bin_number] = m; });
+  return open;
+}
+
+function renderMaintenance(){
+  const rows = filterMStatus==='all' ? MAINTENANCE : MAINTENANCE.filter(m=>m.status===filterMStatus);
+  const body = $('maintenanceBody');
+  if(rows.length===0){ body.innerHTML='<tr><td colspan="8"><div class="empty-state">No maintenance records</div></td></tr>'; return; }
+  body.innerHTML = rows.map(m => {
+    let actions = '';
+    if(canEdit()) actions += `<button class="row-btn edit" data-id="${m.id}">Edit</button>`;
+    if(canEdit() && m.status==='in_repair') actions += `<button class="row-btn" data-id="${m.id}" data-complete="1">Mark returned</button>`;
+    if(canDelete()) actions += `<button class="row-btn del" data-id="${m.id}">Delete</button>`;
+    return `
+    <tr>
+      <td>${m.bin_number}</td>
+      <td>${m.workshop_name}</td>
+      <td>${fmtDate(m.sent_date)}</td>
+      <td><span class="pill ${m.status==='in_repair'?'deploy':'collect'}">${m.status==='in_repair'?'In Repair':'Completed'}</span></td>
+      <td>${fmtDate(m.returned_date)}</td>
+      <td>${m.notes || '—'}</td>
+      <td>${m.logged_by || '—'}</td>
+      <td>${actions}</td>
+    </tr>`;
+  }).join('');
+
+  body.querySelectorAll('.row-btn.edit').forEach(btn => btn.addEventListener('click', () => openMaintenanceModal(btn.dataset.id)));
+  body.querySelectorAll('.row-btn.del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if(!confirm('Delete this maintenance record? This cannot be undone.')) return;
+      const rec = MAINTENANCE.find(x=>x.id===btn.dataset.id);
+      const { error } = await sb.from('bin_maintenance').delete().eq('id', btn.dataset.id);
+      if(error){ console.error(error); toast('Failed to delete'); return; }
+      await logAudit('delete_maintenance', rec?rec.bin_number:btn.dataset.id, 'Deleted maintenance record');
+      toast('Record deleted');
+      await loadMaintenance(); renderMaintenance();
+    });
+  });
+  body.querySelectorAll('[data-complete]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const rec = MAINTENANCE.find(x=>x.id===btn.dataset.id);
+      if(!rec) return;
+      const returnedDate = prompt(`Return date for bin ${rec.bin_number} (YYYY-MM-DD)`, todayISO());
+      if(!returnedDate) return;
+      const { error } = await sb.from('bin_maintenance').update({ status:'completed', returned_date: returnedDate, updated_at: new Date().toISOString() }).eq('id', rec.id);
+      if(error){ console.error(error); toast('Failed to update'); return; }
+      await logAudit('complete_maintenance', rec.bin_number, `Returned from ${rec.workshop_name} on ${returnedDate}`);
+      toast('Marked as returned from repair');
+      await loadMaintenance(); renderMaintenance();
+      if($('view-bins').classList.contains('active')) renderBins();
+    });
+  });
+}
+document.querySelectorAll('[data-mstatus]').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('[data-mstatus]').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active'); filterMStatus = chip.dataset.mstatus; renderMaintenance();
+  });
+});
+
+function openMaintenanceModal(id){
+  const m = id ? MAINTENANCE.find(x=>x.id===id) : null;
+  editingMaintenanceId = id || null;
+  $('maintenanceModalTitle').textContent = m ? 'Edit maintenance record' : 'Send bin for repair';
+  $('maintenanceModalHint').textContent = m ? 'Update this maintenance record.' : 'Log a bin going to a maintenance hub / workshop for repair.';
+  $('m-bin').value = m ? m.bin_number : '';
+  $('m-workshop').value = m ? m.workshop_name : '';
+  $('m-sent-date').value = m ? m.sent_date : todayISO();
+  $('m-notes').value = m ? (m.notes||'') : '';
+  $('m-status-wrap').style.display = m ? 'block' : 'none';
+  $('m-returned-wrap').style.display = (m && m.status==='completed') ? 'block' : 'none';
+  $('m-returned-date').value = m ? (m.returned_date||todayISO()) : '';
+  document.querySelectorAll('#m-status .action-opt').forEach(o=>o.classList.toggle('sel', o.dataset.v===(m?m.status:'in_repair')));
+  $('saveMaintenance').textContent = m ? 'Save changes' : 'Send for repair';
+  $('maintenanceOverlay').classList.add('show');
+}
+document.querySelectorAll('#m-status .action-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    document.querySelectorAll('#m-status .action-opt').forEach(o=>o.classList.remove('sel'));
+    opt.classList.add('sel');
+    $('m-returned-wrap').style.display = opt.dataset.v==='completed' ? 'block' : 'none';
+  });
+});
+$('openNewMaintenance').addEventListener('click', () => openMaintenanceModal(null));
+$('closeMaintenance').addEventListener('click', () => $('maintenanceOverlay').classList.remove('show'));
+$('cancelMaintenance').addEventListener('click', () => $('maintenanceOverlay').classList.remove('show'));
+$('saveMaintenance').addEventListener('click', async () => {
+  const bin = $('m-bin').value.trim(), workshop = $('m-workshop').value.trim(), sentDate = $('m-sent-date').value;
+  if(!bin){ toast('Enter the bin number'); return; }
+  if(!workshop){ toast('Enter the workshop / maintenance hub'); return; }
+  if(!sentDate){ toast('Select a sent date'); return; }
+  const notes = $('m-notes').value || null;
+
+  if(editingMaintenanceId){
+    const status = document.querySelector('#m-status .action-opt.sel').dataset.v;
+    const returnedDate = status==='completed' ? ($('m-returned-date').value || todayISO()) : null;
+    const { error } = await sb.from('bin_maintenance').update({
+      bin_number: bin, workshop_name: workshop, sent_date: sentDate, notes, status, returned_date: returnedDate, updated_at: new Date().toISOString()
+    }).eq('id', editingMaintenanceId);
+    if(error){ console.error(error); toast('Failed to update record'); return; }
+    await logAudit('edit_maintenance', bin, `Updated maintenance record at ${workshop}`);
+    toast('Maintenance record updated');
+  } else {
+    const { error } = await sb.from('bin_maintenance').insert({
+      entity_id: ACTIVE_ENTITY_ID, bin_number: bin, workshop_name: workshop, sent_date: sentDate,
+      notes, status: 'in_repair', logged_by: CURRENT_USER ? CURRENT_USER.name : null
+    });
+    if(error){ console.error(error); toast('Failed to save — check console'); return; }
+    await logAudit('send_for_repair', bin, `Sent to ${workshop} for repair`);
+    toast('Bin logged for repair');
+  }
+  $('maintenanceOverlay').classList.remove('show');
+  await loadMaintenance(); renderMaintenance();
+  if($('view-bins').classList.contains('active')) renderBins();
+});
+
+// ===== Photo capture/upload =====
+function resizeImage(file, maxDim, quality){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = (e) => { img.src = e.target.result; };
+    reader.onerror = reject;
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if(w > h && w > maxDim){ h = Math.round(h * maxDim/w); w = maxDim; }
+      else if(h > maxDim){ w = Math.round(w * maxDim/h); h = maxDim; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      canvas.toBlob(blob => resolve(blob), 'image/jpeg', quality);
+    };
+    img.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+$('f-photo').addEventListener('change', () => {
+  const file = $('f-photo').files[0];
+  if(!file) return;
+  pendingPhotoFile = file;
+  removeExistingPhoto = false;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    $('photoPreview').src = e.target.result;
+    $('photoPreviewWrap').style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+});
+$('removePhoto').addEventListener('click', () => {
+  pendingPhotoFile = null;
+  removeExistingPhoto = true;
+  $('f-photo').value = '';
+  $('photoPreviewWrap').style.display = 'none';
+  $('photoPreview').src = '';
+});
+async function uploadTripPhoto(file){
+  const resized = await resizeImage(file, 1280, 0.72);
+  const path = `${ACTIVE_ENTITY_ID}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.jpg`;
+  const { error } = await sb.storage.from('trip-photos').upload(path, resized, { contentType: 'image/jpeg' });
+  if(error){ console.error(error); throw error; }
+  const { data } = sb.storage.from('trip-photos').getPublicUrl(path);
+  return data.publicUrl;
+}
+
 // ===== Trip modal (shared create/edit) =====
 function populateClientSelect(){
   $('f-client').innerHTML = '<option value="">Select customer…</option>' + CLIENTS.map(c=>`<option value="${c.id}">${c.name}</option>`).join('') + '<option value="__new__">+ Add new customer…</option>';
@@ -846,14 +1670,49 @@ function refreshSiteSelect(clientId, preselectSiteId){
   $('f-site').disabled = false;
   $('f-site').innerHTML = (opts.length ? '<option value="">Select site…</option>' + opts.map(s=>`<option value="${s.id}" ${s.id===preselectSiteId?'selected':''}>${s.site_name}${s.city?' — '+s.city:''}</option>`).join('') : '<option value="">No sites yet for this customer</option>') + '<option value="__new__">+ Add new site…</option>';
 }
+function setNewSiteVisible(show){
+  $('f-newsite-wrap').style.display = show ? 'block' : 'none';
+  $('f-newsite-optional-wrap').style.display = show ? 'block' : 'none';
+}
 $('f-client').addEventListener('change', () => {
   const val = $('f-client').value;
   $('f-newclient-wrap').style.display = val==='__new__' ? 'block' : 'none';
-  if(val==='__new__'){ $('f-site').innerHTML='<option value="">Will create with new customer…</option>'; $('f-site').disabled=true; $('f-newsite-wrap').style.display='block'; }
-  else if(val){ $('f-newsite-wrap').style.display='none'; refreshSiteSelect(val); }
-  else { $('f-site').disabled=false; $('f-site').innerHTML='<option value="">Select customer first…</option>'; $('f-newsite-wrap').style.display='none'; }
+  $('clientEditPanel').style.display = 'none';
+  const isRealClient = val && val !== '__new__';
+  $('editClientToggleWrap').style.display = (isRealClient && canEdit()) ? 'block' : 'none';
+  if(val==='__new__'){ $('f-site').innerHTML='<option value="">Will create with new customer…</option>'; $('f-site').disabled=true; setNewSiteVisible(true); }
+  else if(val){ setNewSiteVisible(false); refreshSiteSelect(val); }
+  else { $('f-site').disabled=false; $('f-site').innerHTML='<option value="">Select customer first…</option>'; setNewSiteVisible(false); }
 });
-$('f-site').addEventListener('change', () => { $('f-newsite-wrap').style.display = $('f-site').value==='__new__' ? 'block' : 'none'; });
+$('editClientToggle').addEventListener('click', () => {
+  const clientId = $('f-client').value;
+  const c = CLIENTS.find(x=>x.id===clientId);
+  if(!c) return;
+  const panel = $('clientEditPanel');
+  const opening = panel.style.display === 'none';
+  if(opening){
+    $('ce-name').value = c.name || '';
+    $('ce-contact').value = c.contact_name || '';
+    $('ce-phone').value = c.contact_phone || '';
+  }
+  panel.style.display = opening ? 'block' : 'none';
+});
+$('saveClientEdit').addEventListener('click', async () => {
+  const clientId = $('f-client').value;
+  const name = $('ce-name').value.trim();
+  if(!name){ toast('Customer name cannot be empty'); return; }
+  const update = { name, contact_name: $('ce-contact').value || null, contact_phone: $('ce-phone').value || null };
+  const { error } = await sb.from('logistics_clients').update(update).eq('id', clientId);
+  if(error){ console.error(error); toast('Failed to update customer'); return; }
+  const c = CLIENTS.find(x=>x.id===clientId);
+  if(c){ c.name = update.name; c.contact_name = update.contact_name; c.contact_phone = update.contact_phone; }
+  populateClientSelect();
+  $('f-client').value = clientId;
+  await logAudit('edit_customer', name, 'Updated customer contact details');
+  toast('Customer details updated');
+  $('clientEditPanel').style.display = 'none';
+});
+$('f-site').addEventListener('change', () => { setNewSiteVisible($('f-site').value==='__new__'); });
 document.querySelectorAll('#f-waste .waste-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#f-waste .waste-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); newWasteSelection=opt.dataset.v; }));
 document.querySelectorAll('#f-action .action-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#f-action .action-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); newActionSelection=opt.dataset.v; }));
 
@@ -862,13 +1721,21 @@ function resetTripForm(){
   $('f-site').innerHTML = '<option value="">Select customer first…</option>'; $('f-site').disabled=false;
   $('f-date').value = todayISO();
   $('f-lorry').value=''; $('f-bin').value=''; $('f-driver').value=''; $('f-notes').value='';
-  $('f-newclient-name').value=''; $('f-newclient-contact').value=''; $('f-newclient-phone').value='';
+  $('binStatusHint').style.display='none';
+  $('f-newclient-name').value='';
   $('f-newsite-name').value=''; $('f-newsite-city').value=''; $('f-newsite-state').value='';
-  $('f-newclient-wrap').style.display='none'; $('f-newsite-wrap').style.display='none';
+  $('f-newclient-wrap').style.display='none'; setNewSiteVisible(false);
+  $('editClientToggleWrap').style.display='none'; $('clientEditPanel').style.display='none';
   newWasteSelection=null; newActionSelection='deploy';
   document.querySelectorAll('#f-waste .waste-opt').forEach(o=>o.classList.remove('sel'));
   document.querySelectorAll('#f-action .action-opt').forEach(o=>o.classList.remove('sel'));
   document.querySelector('#f-action .action-opt[data-v="deploy"]').classList.add('sel');
+  $('f-photo').value = '';
+  $('photoPreviewWrap').style.display = 'none';
+  $('photoPreview').src = '';
+  pendingPhotoFile = null;
+  existingPhotoUrl = null;
+  removeExistingPhoto = false;
 }
 
 $('openNew').addEventListener('click', () => {
@@ -891,12 +1758,15 @@ function openTripModal(tripId){
   $('saveTrip').textContent = 'Save changes';
 
   populateClientSelect();
-  $('f-newclient-wrap').style.display='none'; $('f-newsite-wrap').style.display='none';
+  $('f-newclient-wrap').style.display='none'; setNewSiteVisible(false);
+  $('clientEditPanel').style.display='none';
   $('f-client').value = t.client_id;
+  $('editClientToggleWrap').style.display = canEdit() ? 'block' : 'none';
   refreshSiteSelect(t.client_id, t.site_id);
   $('f-date').value = t.trip_date;
   $('f-lorry').value = t.lorry_number || '';
   $('f-bin').value = t.bin_number || '';
+  $('f-bin').dispatchEvent(new Event('input'));
   $('f-driver').value = t.driver_name || '';
   $('f-notes').value = t.notes || '';
 
@@ -905,23 +1775,73 @@ function openTripModal(tripId){
   newActionSelection = t.action;
   document.querySelectorAll('#f-action .action-opt').forEach(o=>o.classList.toggle('sel', o.dataset.v===t.action));
 
+  pendingPhotoFile = null; removeExistingPhoto = false; $('f-photo').value = '';
+  existingPhotoUrl = t.photo_url || null;
+  if(existingPhotoUrl){ $('photoPreview').src = existingPhotoUrl; $('photoPreviewWrap').style.display='block'; }
+  else { $('photoPreviewWrap').style.display='none'; $('photoPreview').src=''; }
+
   $('tripOverlay').classList.add('show');
 }
 $('closeTrip').addEventListener('click', () => $('tripOverlay').classList.remove('show'));
 $('cancelTrip').addEventListener('click', () => $('tripOverlay').classList.remove('show'));
+
+function getLatestTripForBin(binNumber, excludeTripId){
+  const matches = TRIPS.filter(t => t.bin_number === binNumber && t.id !== excludeTripId);
+  if(matches.length === 0) return null;
+  return matches.reduce((latest, t) => {
+    if(!latest) return t;
+    if(t.trip_date > latest.trip_date || (t.trip_date===latest.trip_date && t.created_at>latest.created_at)) return t;
+    return latest;
+  }, null);
+}
+
+$('f-bin').addEventListener('input', () => {
+  const hint = $('binStatusHint');
+  const val = $('f-bin').value.trim();
+  if(!val){ hint.style.display='none'; return; }
+  const latest = getLatestTripForBin(val, editingTripId);
+  if(!latest){ hint.style.display='none'; return; }
+  const site = siteName(latest.site_id), client = clientName(latest.client_id);
+  if(latest.action === 'deploy'){
+    hint.style.display='block';
+    hint.style.color = 'var(--red)';
+    hint.textContent = `⚠ Currently Bin Out at ${client} — ${site} (${fmtDate(latest.trip_date)})`;
+  } else {
+    hint.style.display='block';
+    hint.style.color = 'var(--sage)';
+    hint.textContent = `✓ Last recorded as Bin In (${fmtDate(latest.trip_date)}) — available for Bin Out`;
+  }
+});
 
 $('saveTrip').addEventListener('click', async () => {
   if(!newActionSelection){ toast('Select deploy or collect'); return; }
   if(!$('f-date').value){ toast('Select a trip date'); return; }
   if(!$('f-bin').value.trim()){ toast('Enter the bin number'); return; }
   if(!newWasteSelection){ toast('Select the waste type'); return; }
+
+  const binNumber = $('f-bin').value.trim();
+  const latest = getLatestTripForBin(binNumber, editingTripId);
+  if(latest){
+    if(newActionSelection === 'deploy' && latest.action === 'deploy'){
+      const site = siteName(latest.site_id), client = clientName(latest.client_id);
+      const ok = confirm(`Bin ${binNumber} is already marked Bin Out at ${client} — ${site} and hasn't been logged as Bin In yet.\n\nThis bin should be collected before being deployed again. Log this anyway?`);
+      if(!ok) return;
+      await logAudit('bin_out_conflict_override', binNumber, `Logged Bin Out while bin already out at ${client} — ${site}`);
+    }
+    if(newActionSelection === 'collect' && latest.action === 'collect'){
+      const ok = confirm(`Bin ${binNumber} is already marked Bin In and isn't currently deployed anywhere.\n\nLog this anyway?`);
+      if(!ok) return;
+      await logAudit('bin_in_conflict_override', binNumber, `Logged Bin In while bin was already in`);
+    }
+  }
+
   let clientId = $('f-client').value, siteId = $('f-site').value;
   if(!clientId){ toast('Select or add a customer'); return; }
 
   if(clientId === '__new__'){
     const name = $('f-newclient-name').value.trim();
     if(!name){ toast('Enter the new customer name'); return; }
-    const { data, error } = await sb.from('logistics_clients').insert({ name, contact_name: $('f-newclient-contact').value||null, contact_phone: $('f-newclient-phone').value||null, entity_id: ACTIVE_ENTITY_ID }).select().single();
+    const { data, error } = await sb.from('logistics_clients').insert({ name, entity_id: ACTIVE_ENTITY_ID }).select().single();
     if(error){ console.error(error); toast('Failed to create customer'); return; }
     clientId = data.id; CLIENTS.push(data); siteId = '__new__';
     await logAudit('create_customer', name, 'Added new logistics customer');
@@ -936,12 +1856,21 @@ $('saveTrip').addEventListener('click', async () => {
     await logAudit('create_site', siteNameVal, `Added new site for ${clientName(clientId)}`);
   }
 
+  let photoUrl = existingPhotoUrl;
+  if(removeExistingPhoto) photoUrl = null;
+  if(pendingPhotoFile){
+    $('saveTrip').disabled = true; $('saveTrip').textContent = 'Uploading photo…';
+    try{ photoUrl = await uploadTripPhoto(pendingPhotoFile); }
+    catch(e){ toast('Photo upload failed — saving without photo'); photoUrl = existingPhotoUrl; }
+    $('saveTrip').disabled = false;
+  }
+
   if(editingTripId){
     const update = {
       trip_date: $('f-date').value, client_id: clientId, site_id: siteId,
       lorry_number: $('f-lorry').value||null, bin_number: $('f-bin').value.trim(),
       driver_name: $('f-driver').value||null, waste_type: newWasteSelection,
-      action: newActionSelection, notes: $('f-notes').value||null,
+      action: newActionSelection, notes: $('f-notes').value||null, photo_url: photoUrl,
       last_edited_by: CURRENT_USER ? CURRENT_USER.name : null, last_edited_at: new Date().toISOString()
     };
     const { error } = await sb.from('trip_log').update(update).eq('id', editingTripId);
@@ -953,7 +1882,7 @@ $('saveTrip').addEventListener('click', async () => {
       trip_date: $('f-date').value, client_id: clientId, site_id: siteId,
       lorry_number: $('f-lorry').value||null, bin_number: $('f-bin').value.trim(),
       driver_name: $('f-driver').value||null, waste_type: newWasteSelection,
-      action: newActionSelection, notes: $('f-notes').value||null,
+      action: newActionSelection, notes: $('f-notes').value||null, photo_url: photoUrl,
       logged_by: CURRENT_USER ? CURRENT_USER.name : null, entity_id: ACTIVE_ENTITY_ID
     };
     const { error } = await sb.from('trip_log').insert(payload);
@@ -961,11 +1890,12 @@ $('saveTrip').addEventListener('click', async () => {
     await logAudit(newActionSelection==='deploy'?'deploy_bin':'collect_bin', payload.bin_number, `${clientName(clientId)} — ${siteName(siteId)}`);
     toast('Trip logged');
   }
+  $('saveTrip').textContent = editingTripId ? 'Save changes' : 'Log trip';
   $('tripOverlay').classList.remove('show');
   await loadAll();
 });
 
-[$('tripOverlay'), $('newStaffOverlay')].forEach(ov => ov.addEventListener('click', (e) => { if(e.target===ov) ov.classList.remove('show'); }));
+[$('tripOverlay'), $('newStaffOverlay'), $('customerOverlay'), $('maintenanceOverlay'), $('binRegistryOverlay'), $('importExcelOverlay')].forEach(ov => ov.addEventListener('click', (e) => { if(e.target===ov) ov.classList.remove('show'); }));
 </script>
 </body>
 </html>
