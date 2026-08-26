@@ -12,14 +12,14 @@
 <style>
   :root{
     --bg: #F3F1EC; --panel: #FFFFFF; --panel-2: #F5F2EC; --border: #E1DBCF;
-    --text: #23201A; --text-dim: #6E6A5F; --amber: #D97706; --blue: #2E6DB4;
+    --text: #23201A; --text-dim: #6E6A5F; --amber: #4C9A6A; --blue: #2E6DB4;
     --violet: #6E5FC7; --sage: #4E8067; --red: #C4441F;
     --carton: #A8763F; --plastic: #2E6DB4; --metal: #7A8087; --general: #6E6355;
   }
   *{box-sizing:border-box; margin:0; padding:0;}
   body{
     background: var(--bg); color: var(--text); font-family: 'IBM Plex Mono', monospace; min-height: 100vh;
-    background-image: radial-gradient(circle at 15% 0%, rgba(217,119,6,0.06), transparent 40%), radial-gradient(circle at 85% 100%, rgba(46,109,180,0.06), transparent 40%);
+    background-image: radial-gradient(circle at 15% 0%, rgba(76,154,106,0.06), transparent 40%), radial-gradient(circle at 85% 100%, rgba(46,109,180,0.06), transparent 40%);
   }
   h1,h2,h3, .display{ font-family:'Space Grotesk', sans-serif; }
   button, select, input{ font-family: inherit; }
@@ -71,7 +71,7 @@
   .filters select, .filters input{ background: var(--panel); border:1px solid var(--border); color:var(--text); padding: 9px 12px; border-radius: 8px; font-size:12.5px; }
   .filters input[type="text"]{ width:120px; }
   .filters .fchip{ border:1px solid var(--border); background: var(--panel); color:var(--text-dim); font-size:12px; padding:7px 12px; border-radius:20px; cursor:pointer; }
-  .filters .fchip.active{ border-color: var(--amber); color: var(--amber); background: rgba(245,166,35,0.08); }
+  .filters .fchip.active{ border-color: var(--amber); color: var(--amber); background: rgba(76,154,106,0.08); }
   .filters .clear{ font-size:11.5px; color:var(--text-dim); text-decoration:underline; cursor:pointer; }
   .filters .spacer{ flex:1; }
 
@@ -84,7 +84,7 @@
   .pill{ font-size:10px; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:0.4px; font-weight:600; white-space:nowrap; }
   .pill.deploy{ color: var(--blue); background: rgba(74,144,217,0.12); }
   .pill.collect{ color: var(--sage); background: rgba(107,144,128,0.15); }
-  .pill.role-admin{ color: var(--amber); background: rgba(245,166,35,0.12); }
+  .pill.role-admin{ color: var(--amber); background: rgba(76,154,106,0.12); }
   .pill.role-maker{ color: var(--blue); background: rgba(74,144,217,0.12); }
   .pill.role-checker{ color: var(--text-dim); background: rgba(147,160,171,0.12); }
   .pill.role-reviewer{ color: var(--violet); background: rgba(139,127,209,0.15); }
@@ -133,7 +133,7 @@
   .action-grid{ grid-template-columns: repeat(2,1fr); }
   .role-grid{ grid-template-columns: repeat(3,1fr); }
   .waste-opt, .action-opt, .role-opt{ border:1px solid var(--border); background:#FAF8F3; border-radius:8px; padding:9px 4px; text-align:center; font-size:11px; cursor:pointer; color:var(--text-dim); }
-  .waste-opt.sel, .action-opt.sel, .role-opt.sel{ border-color: var(--amber); color: var(--amber); background: rgba(245,166,35,0.08); }
+  .waste-opt.sel, .action-opt.sel, .role-opt.sel{ border-color: var(--amber); color: var(--amber); background: rgba(76,154,106,0.08); }
   .modal-actions{ display:flex; gap:8px; margin-top:18px; }
   .modal-actions button{ flex:1; padding:11px; border-radius:8px; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; cursor:pointer; }
   .btn-cancel{ background:transparent; border:1px solid var(--border); color:var(--text-dim); }
@@ -750,10 +750,20 @@ async function renderStaff(){
       <td><span class="pill role-${s.role}">${s.role}</span></td>
       <td>${s.is_active ? 'Active' : 'Disabled'}</td>
       <td>${fmtDateTime(s.created_at)}</td>
-      <td><button class="row-btn edit" data-id="${s.id}">Edit</button></td>
+      <td><button class="row-btn edit" data-id="${s.id}">Edit</button><button class="row-btn del" data-id="${s.id}" data-name="${s.name}">Delete</button></td>
     </tr>`).join('');
   body.querySelectorAll('.row-btn.edit').forEach(btn => {
     btn.addEventListener('click', () => openStaffModal(btn.dataset.id));
+  });
+  body.querySelectorAll('.row-btn.del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if(!confirm(`Delete staff account "${btn.dataset.name}"? This cannot be undone.`)) return;
+      const { error } = await sb.rpc('delete_logistics_staff', { p_staff_id: btn.dataset.id });
+      if(error){ console.error(error); toast('Failed to delete staff account'); return; }
+      await logAudit('delete_staff', btn.dataset.name, `Deleted staff account at ${entityName(ACTIVE_ENTITY_ID)}`);
+      toast('Staff account deleted');
+      renderStaff();
+    });
   });
 }
 
