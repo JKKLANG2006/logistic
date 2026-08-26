@@ -154,7 +154,10 @@
     </div>
     <div class="field">
       <label>Password</label>
-      <input type="password" id="login-password" autocomplete="current-password">
+      <div style="position:relative;">
+        <input type="password" id="login-password" autocomplete="current-password" style="padding-right:44px;">
+        <button type="button" id="togglePw" aria-label="Show password" style="position:absolute; right:6px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text-dim); font-size:11px; cursor:pointer; padding:6px 8px;">Show</button>
+      </div>
     </div>
     <button class="login-btn" id="loginBtn">Enter Dispatch Portal</button>
     <div class="login-err" id="loginErr"></div>
@@ -359,6 +362,12 @@ async function logAudit(action_type, target_name, details){
 const MASTER_ADMIN_EMAIL = 'hq@jkklang.com';
 $('loginBtn').addEventListener('click', doLogin);
 $('login-password').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+$('togglePw').addEventListener('click', () => {
+  const pw = $('login-password');
+  const isHidden = pw.type === 'password';
+  pw.type = isHidden ? 'text' : 'password';
+  $('togglePw').textContent = isHidden ? 'Hide' : 'Show';
+});
 
 async function doLogin(){
   const username = $('login-username').value.trim();
@@ -366,7 +375,7 @@ async function doLogin(){
   $('loginErr').textContent = '';
   if(!username || !password){ $('loginErr').textContent = 'Enter username and password'; return; }
 
-  if(username.toLowerCase() === 'admin'){
+  if(username.toLowerCase() === 'admin' || username.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()){
     const { data, error } = await sb.auth.signInWithPassword({ email: MASTER_ADMIN_EMAIL, password });
     if(error){ console.error(error); $('loginErr').textContent = 'Invalid admin password'; return; }
     CURRENT_USER = { id: data.user.id, name: 'Master Admin', role: 'admin', authType: 'master', entity_id: null };
