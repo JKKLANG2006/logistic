@@ -16,6 +16,7 @@
     --text: #23201A; --text-dim: #6E6A5F; --amber: #4C9A6A; --blue: #2E6DB4;
     --violet: #6E5FC7; --sage: #4E8067; --red: #C4441F;
     --carton: #A8763F; --plastic: #2E6DB4; --metal: #7A8087; --general: #6E6355;
+    --teal: #2A9D8F; --pink: #C2528F;
   }
   *{box-sizing:border-box; margin:0; padding:0;}
   body{
@@ -60,6 +61,15 @@
   .tabs{ display:flex; gap:6px; flex-wrap:wrap; padding-bottom: 10px; }
   .tab{ font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12.5px; padding: 9px 14px; border-radius:8px; cursor:pointer; color:var(--text-dim); border: 1px solid transparent; }
   .tab.active{ background: var(--panel); border-color:var(--border); color: var(--text); }
+  .tab::before{ content:''; display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:7px; vertical-align:middle; }
+  .tab[data-view="log"]::before{ background: var(--blue); }
+  .tab[data-view="bins"]::before{ background: var(--sage); }
+  .tab[data-view="maintenance"]::before{ background: var(--violet); }
+  .tab[data-view="binregistry"]::before{ background: var(--carton); }
+  .tab[data-view="customers"]::before{ background: var(--teal); }
+  .tab[data-view="audit"]::before{ background: var(--red); }
+  .tab[data-view="staff"]::before{ background: var(--pink); }
+  .tab[data-view="copilot"]::before{ display:none; }
 
   .headright{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .userchip{ font-size:11.5px; color:var(--text-dim); text-align:right; line-height:1.3; }
@@ -156,6 +166,15 @@
   .toast{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background: var(--panel-2); border:1px solid var(--border); color:var(--text); padding: 11px 18px; border-radius:9px; font-size:12.5px; z-index:60; opacity:0; pointer-events:none; transition: opacity .2s ease, transform .2s ease; }
   .toast.show{ opacity:1; transform: translateX(-50%) translateY(-4px); }
   .loading{ text-align:center; padding:60px 0; color:var(--text-dim); font-size:13px; }
+
+  .cp-turn{ margin-bottom:20px; }
+  .cp-q{ display:inline-block; background: var(--panel-2); border:1px solid var(--border); border-radius:14px 14px 4px 14px; padding:10px 14px; font-size:13px; margin-left:auto; max-width:80%; float:right; clear:both; }
+  .cp-a{ clear:both; background: var(--panel); border:1px solid var(--border); border-radius:4px 14px 14px 14px; padding:14px 16px; margin-top:10px; font-size:13px; line-height:1.6; }
+  .cp-a .cp-count{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px; color: var(--amber); }
+  .cp-a table{ width:100%; margin-top:10px; font-size:11.5px; border-collapse:collapse; }
+  .cp-a th{ text-align:left; padding:6px 8px; color:var(--text-dim); border-bottom:1px solid var(--border); font-weight:600; text-transform:uppercase; letter-spacing:0.3px; font-size:10px; }
+  .cp-a td{ padding:6px 8px; border-bottom:1px solid var(--border); }
+  .cp-clearfix{ clear:both; }
 </style>
 </head>
 <body>
@@ -203,6 +222,7 @@
     <div class="tab" data-view="customers" id="customersTab" style="display:none;">Customers</div>
     <div class="tab" data-view="audit" id="auditTab" style="display:none;">Audit Trail</div>
     <div class="tab" data-view="staff" id="staffTab" style="display:none;">Staff</div>
+    <div class="tab" data-view="copilot" id="copilotTab" style="display:none;">✨ Co-pilot</div>
   </div>
 </header>
 
@@ -221,10 +241,13 @@
       <input type="date" id="filt-date-from" title="From date">
       <span style="color:var(--text-dim); font-size:12px;">to</span>
       <input type="date" id="filt-date-to" title="To date">
-      <span class="fchip" data-preset="today">Today</span>
-      <span class="fchip" data-preset="week">This week</span>
-      <span class="fchip" data-preset="month">This month</span>
-      <span class="fchip" data-preset="lastmonth">Last month</span>
+      <select id="filt-date-preset">
+        <option value="">Quick range…</option>
+        <option value="today">Today</option>
+        <option value="week">This week</option>
+        <option value="month">This month</option>
+        <option value="lastmonth">Last month</option>
+      </select>
       <select id="filt-driver"><option value="">All drivers</option></select>
       <select id="filt-client"><option value="">All customers</option></select>
     </div>
@@ -344,6 +367,25 @@
         <tbody id="staffBody"></tbody>
       </table>
     </div>
+  </div>
+
+  <div class="view" id="view-copilot">
+    <div class="section-head">
+      <h2>✨ Co-pilot Search</h2>
+    </div>
+    <div class="hint" style="margin-bottom:14px;">Ask questions about your data in plain language — bins, trips, drivers, customers, repairs. This searches your loaded data using pattern matching, not a live AI model.</div>
+    <div class="filters" id="copilotExamples">
+      <span class="fchip" data-example="1">bins out more than 5 days</span>
+      <span class="fchip" data-example="2">how many trips this month</span>
+      <span class="fchip" data-example="3">unreviewed trips this week</span>
+      <span class="fchip" data-example="4">bins in repair</span>
+      <span class="fchip" data-example="5">trips by driver today</span>
+    </div>
+    <div style="display:flex; gap:8px; margin-bottom:16px;">
+      <input type="text" id="copilotInput" placeholder="e.g. show carton bin out trips at Radams Enterprise this month" style="flex:1;">
+      <button class="btn-new" id="copilotAsk">Ask</button>
+    </div>
+    <div id="copilotThread"></div>
   </div>
 </main>
 </div>
@@ -607,7 +649,7 @@ async function doLogin(){
     if(error){ console.error(error); $('loginErr').textContent = 'Invalid admin password'; return; }
     CURRENT_USER = { id: data.user.id, name: 'Master Admin', role: 'admin', authType: 'master', entity_id: null };
     await ensureEntitiesLoaded();
-    ACTIVE_ENTITY_ID = ENTITIES[0] ? ENTITIES[0].id : null;
+    ACTIVE_ENTITY_ID = defaultEntityId();
     await logAudit('login', CURRENT_USER.name, 'Master admin logged in');
     enterApp();
     return;
@@ -629,6 +671,10 @@ async function ensureEntitiesLoaded(){
   const { data, error } = await sb.from('entities').select('*').order('name');
   if(error){ console.error(error); return; }
   ENTITIES = data || [];
+}
+function defaultEntityId(){
+  const preferred = ENTITIES.find(e => e.name.toLowerCase().includes('jk klang'));
+  return preferred ? preferred.id : (ENTITIES[0] ? ENTITIES[0].id : null);
 }
 
 function renderEntitySwitcher(){
@@ -656,6 +702,7 @@ function enterApp(){
   $('whoRole').textContent = roleLabel;
   $('roleNote').textContent = ROLE_NOTES[CURRENT_USER.role] || '';
   $('staffTab').style.display = isMaster() ? 'block' : 'none';
+  $('copilotTab').style.display = isMaster() ? 'block' : 'none';
   $('auditTab').style.display = canSeeAudit() ? 'block' : 'none';
   $('customersTab').style.display = canEdit() ? 'block' : 'none';
   $('openNewBin').style.display = canEdit() ? 'inline-block' : 'none';
@@ -708,7 +755,7 @@ $('logoutBtn').addEventListener('click', () => doLogout('Logged out'));
   if(session && session.user && session.user.email){
     CURRENT_USER = { id: session.user.id, name: 'Master Admin', role: 'admin', authType: 'master', entity_id: null };
     await ensureEntitiesLoaded();
-    ACTIVE_ENTITY_ID = ENTITIES[0] ? ENTITIES[0].id : null;
+    ACTIVE_ENTITY_ID = defaultEntityId();
     enterApp();
     return;
   }
@@ -821,8 +868,8 @@ function applyDatePreset(preset){
   $('filt-date-from').value = from; $('filt-date-to').value = to;
   renderLog();
 }
-document.querySelectorAll('[data-preset]').forEach(chip => {
-  chip.addEventListener('click', () => applyDatePreset(chip.dataset.preset));
+$('filt-date-preset').addEventListener('change', () => {
+  if($('filt-date-preset').value) applyDatePreset($('filt-date-preset').value);
 });
 $('filt-search').addEventListener('input', renderLog);
 
@@ -933,7 +980,7 @@ document.querySelectorAll('[data-action]').forEach(chip => {
   });
 });
 $('clearFilters').addEventListener('click', () => {
-  $('filt-date-from').value=''; $('filt-date-to').value=''; $('filt-driver').value=''; $('filt-client').value=''; $('filt-site').value=''; $('filt-lorry').value=''; $('filt-bin').value=''; $('filt-search').value='';
+  $('filt-date-from').value=''; $('filt-date-to').value=''; $('filt-date-preset').value=''; $('filt-driver').value=''; $('filt-client').value=''; $('filt-site').value=''; $('filt-lorry').value=''; $('filt-bin').value=''; $('filt-search').value='';
   filterAction='all';
   document.querySelectorAll('[data-action]').forEach(c=>c.classList.remove('active'));
   document.querySelector('[data-action="all"]').classList.add('active');
@@ -1853,6 +1900,185 @@ async function uploadTripPhoto(file){
   const { data } = sb.storage.from('trip-photos').getPublicUrl(path);
   return data.publicUrl;
 }
+
+// ===== Co-pilot smart search (pattern-matching, not a live AI) =====
+function cpDateRange(q){
+  const now = new Date();
+  const iso = (d) => d.toISOString().slice(0,10);
+  const today = iso(now);
+  if(/\btoday\b/.test(q)) return { from: today, to: today, label: 'today' };
+  if(/\byesterday\b/.test(q)){
+    const y = new Date(now); y.setDate(now.getDate()-1);
+    return { from: iso(y), to: iso(y), label: 'yesterday' };
+  }
+  if(/\bthis week\b/.test(q)){
+    const day = now.getDay()===0?6:now.getDay()-1;
+    const monday = new Date(now); monday.setDate(now.getDate()-day);
+    return { from: iso(monday), to: today, label: 'this week' };
+  }
+  if(/\blast week\b/.test(q)){
+    const day = now.getDay()===0?6:now.getDay()-1;
+    const thisMonday = new Date(now); thisMonday.setDate(now.getDate()-day);
+    const lastMonday = new Date(thisMonday); lastMonday.setDate(thisMonday.getDate()-7);
+    const lastSunday = new Date(thisMonday); lastSunday.setDate(thisMonday.getDate()-1);
+    return { from: iso(lastMonday), to: iso(lastSunday), label: 'last week' };
+  }
+  if(/\bthis month\b/.test(q)){
+    return { from: iso(new Date(now.getFullYear(), now.getMonth(), 1)), to: today, label: 'this month' };
+  }
+  if(/\blast month\b/.test(q)){
+    return { from: iso(new Date(now.getFullYear(), now.getMonth()-1, 1)), to: iso(new Date(now.getFullYear(), now.getMonth(), 0)), label: 'last month' };
+  }
+  const explicit = q.match(/\b(\d{4}-\d{2}-\d{2})\b/g);
+  if(explicit && explicit.length===1) return { from: explicit[0], to: explicit[0], label: explicit[0] };
+  if(explicit && explicit.length>=2) return { from: explicit[0], to: explicit[1], label: `${explicit[0]} to ${explicit[1]}` };
+  return null;
+}
+function cpDaysThreshold(q){
+  const m = q.match(/(?:more than|over|>\s*|at least)\s*(\d+)\s*days?/) || q.match(/(\d+)\+\s*days?/);
+  return m ? parseInt(m[1],10) : null;
+}
+function cpMatchEntity(q, list, nameKey){
+  const found = list.filter(x => x[nameKey] && q.includes(x[nameKey].toLowerCase()));
+  found.sort((a,b) => b[nameKey].length - a[nameKey].length);
+  return found[0] || null;
+}
+function cpExtractAction(q){
+  if(/\bbin out\b|\bdeployed?\b|\bdeploy(ing)?\b/.test(q)) return 'deploy';
+  if(/\bbin in\b|\bcollected?\b|\bcollect(ing)?\b|\bpicked up\b/.test(q)) return 'collect';
+  return null;
+}
+function cpExtractWaste(q){
+  if(/\bcarton\b/.test(q)) return 'carton';
+  if(/\bplastic\b/.test(q)) return 'plastic';
+  if(/\bmetal\b/.test(q)) return 'metal';
+  if(/\brubbish\b|\bgeneral\b/.test(q)) return 'general';
+  return null;
+}
+function cpIsCount(q){ return /\bhow many\b|\bcount\b|\btotal number\b|\bnumber of\b/.test(q); }
+function cpIsLeakage(q){ return /\bleak(ing|age)?\b|\bstuck\b|\bstranded\b|\btoo long\b/.test(q); }
+function cpIsRepair(q){ return /\brepair\b|\bworkshop\b|\bmaintenance\b/.test(q); }
+function cpIsUnreviewed(q){ return /\bunreviewed\b|\bnot reviewed\b|\bpending review\b/.test(q); }
+function cpIsReviewed(q){ return /(?<!not |un)\breviewed\b/.test(q) && !cpIsUnreviewed(q); }
+
+function runCopilotQuery(rawQuery){
+  const q = rawQuery.toLowerCase().trim();
+  if(!q) return { summary: "Type a question to get started." };
+
+  const driverNames = [...new Set(TRIPS.map(t=>t.driver_name).filter(Boolean))].map(n=>({driver_name:n.toLowerCase(), original:n}));
+  const clientsLower = CLIENTS.map(c=>({...c, _name: c.name.toLowerCase()}));
+  const sitesLower = SITES.map(s=>({...s, _name: s.site_name.toLowerCase()}));
+
+  const matchedClient = cpMatchEntity(q, clientsLower, '_name');
+  const matchedSite = cpMatchEntity(q, sitesLower, '_name');
+  const matchedDriver = cpMatchEntity(q, driverNames, 'driver_name');
+  const binMatch = q.match(/\bbin\s*(?:no\.?|number)?\s*([a-z0-9-]{2,})\b/);
+  const dateRange = cpDateRange(q);
+  const daysThreshold = cpDaysThreshold(q);
+  const action = cpExtractAction(q);
+  const waste = cpExtractWaste(q);
+  const wantCount = cpIsCount(q);
+
+  // ----- Repair / maintenance queries -----
+  if(cpIsRepair(q)){
+    let rows = MAINTENANCE.filter(m=>m.status==='in_repair');
+    if(binMatch) rows = rows.filter(r=>r.bin_number.toLowerCase().includes(binMatch[1]));
+    if(rows.length===0) return { summary: "No bins are currently in repair." };
+    if(wantCount) return { summary: `<span class="cp-count">${rows.length}</span> bin(s) currently in repair.` };
+    return {
+      summary: `${rows.length} bin(s) currently in repair:`,
+      columns: ['Bin No.','Workshop','Sent','Notes'],
+      rows: rows.map(r=>[r.bin_number, r.workshop_name, fmtDate(r.sent_date), r.notes||'—'])
+    };
+  }
+
+  // ----- Leakage queries -----
+  if(cpIsLeakage(q)){
+    const threshold = daysThreshold || LEAKAGE_THRESHOLD_DAYS;
+    const byBin = {};
+    TRIPS.forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
+    let bins = Object.values(byBin).filter(b => b.action==='deploy' && daysSince(b.trip_date) >= threshold);
+    if(matchedClient) bins = bins.filter(b=>b.client_id===matchedClient.id);
+    if(bins.length===0) return { summary: `No bins currently out ${threshold}+ days${matchedClient?` at ${matchedClient.name}`:''}.` };
+    if(wantCount) return { summary: `<span class="cp-count">${bins.length}</span> bin(s) out ${threshold}+ days${matchedClient?` at ${matchedClient.name}`:''}.` };
+    return {
+      summary: `${bins.length} bin(s) out ${threshold}+ days${matchedClient?` at ${matchedClient.name}`:''}:`,
+      columns: ['Bin No.','Customer','Site','Days Out','Waste'],
+      rows: bins.map(b=>[b.bin_number, clientName(b.client_id), siteName(b.site_id), daysSince(b.trip_date), b.waste_type])
+    };
+  }
+
+  // ----- Customer lookup (no trip filters implied) -----
+  if(/\bbranch(es)?\b|\bcontact\b/.test(q) && matchedClient && !action && !dateRange){
+    const sites = SITES.filter(s=>s.client_id===matchedClient.id);
+    const branchList = sites.length ? sites.map(s=>s.site_name).join(', ') : 'no branches on file';
+    return { summary: `<b>${matchedClient.name}</b><br>Contact: ${matchedClient.contact_name||'—'} ${matchedClient.contact_phone?'· '+matchedClient.contact_phone:''}<br>Branches: ${branchList}` };
+  }
+
+  // ----- Default: trip_log query -----
+  let rows = [...TRIPS];
+  if(dateRange){ rows = rows.filter(t => t.trip_date >= dateRange.from && t.trip_date <= dateRange.to); }
+  if(matchedClient) rows = rows.filter(t=>t.client_id===matchedClient.id);
+  if(matchedSite) rows = rows.filter(t=>t.site_id===matchedSite.id);
+  if(matchedDriver) rows = rows.filter(t=>(t.driver_name||'').toLowerCase()===matchedDriver.driver_name);
+  if(binMatch) rows = rows.filter(t=>t.bin_number.toLowerCase().includes(binMatch[1]));
+  if(action) rows = rows.filter(t=>t.action===action);
+  if(waste) rows = rows.filter(t=>t.waste_type===waste);
+  if(cpIsUnreviewed(q)) rows = rows.filter(t=>!t.reviewed);
+  else if(cpIsReviewed(q)) rows = rows.filter(t=>t.reviewed);
+
+  const filtersApplied = dateRange || matchedClient || matchedSite || matchedDriver || binMatch || action || waste || cpIsUnreviewed(q) || cpIsReviewed(q);
+  if(!filtersApplied){
+    return { summary: `I can search trips, bins, repairs, and customers. Try something like "bins out more than 5 days" or "how many trips this month" — or use the example chips above.` };
+  }
+
+  const descBits = [];
+  if(action) descBits.push(action==='deploy'?'Bin Out':'Bin In');
+  if(waste) descBits.push(waste);
+  descBits.push('trips');
+  if(matchedClient) descBits.push(`at ${matchedClient.name}`);
+  if(matchedSite) descBits.push(`(${matchedSite.site_name})`);
+  if(matchedDriver) descBits.push(`by ${matchedDriver.original}`);
+  if(dateRange) descBits.push(dateRange.label);
+  const desc = descBits.join(' ');
+
+  if(rows.length===0) return { summary: `No ${desc} found.` };
+  if(wantCount) return { summary: `<span class="cp-count">${rows.length}</span> ${desc}.` };
+
+  rows.sort((a,b) => b.trip_date.localeCompare(a.trip_date));
+  return {
+    summary: `${rows.length} ${desc}${rows.length>25?' (showing first 25)':''}:`,
+    columns: ['Date','Customer','Site','Bin No.','Driver','Waste','Action','Reviewed'],
+    rows: rows.slice(0,25).map(t=>[fmtDate(t.trip_date), clientName(t.client_id), siteName(t.site_id), t.bin_number, t.driver_name||'—', t.waste_type, t.action==='deploy'?'Bin Out':'Bin In', t.reviewed?'Yes':'No'])
+  };
+}
+
+function renderCopilotAnswer(query, result){
+  const thread = $('copilotThread');
+  const turn = document.createElement('div');
+  turn.className = 'cp-turn';
+  let tableHtml = '';
+  if(result.rows && result.columns){
+    tableHtml = `<table><thead><tr>${result.columns.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>${result.rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  }
+  turn.innerHTML = `<div class="cp-q">${query}</div><div class="cp-clearfix"></div><div class="cp-a">${result.summary}${tableHtml}</div>`;
+  thread.insertBefore(turn, thread.firstChild);
+}
+
+$('copilotAsk').addEventListener('click', () => {
+  const val = $('copilotInput').value.trim();
+  if(!val) return;
+  const result = runCopilotQuery(val);
+  renderCopilotAnswer(val, result);
+  $('copilotInput').value = '';
+});
+$('copilotInput').addEventListener('keydown', e => { if(e.key==='Enter') $('copilotAsk').click(); });
+document.querySelectorAll('#copilotExamples .fchip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    $('copilotInput').value = chip.textContent;
+    $('copilotAsk').click();
+  });
+});
 
 // ===== Trip modal (shared create/edit) =====
 function populateClientSelect(){
