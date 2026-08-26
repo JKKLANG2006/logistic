@@ -1,10 +1,613 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Logistic Portal</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trip Log — JK Klang Logistics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root{
+    --bg: #14181C;
+    --panel: #1C2228;
+    --panel-2: #222A31;
+    --border: #2C363F;
+    --text: #F2EFE9;
+    --text-dim: #93A0AB;
+    --amber: #F5A623;
+    --blue: #4A90D9;
+    --violet: #8B7FD1;
+    --sage: #6B9080;
+    --red: #E4572E;
+    --carton: #C79A5B;
+    --plastic: #4A90D9;
+    --metal: #9AA5AD;
+    --general: #8A7F76;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(circle at 15% 0%, rgba(245,166,35,0.05), transparent 40%),
+      radial-gradient(circle at 85% 100%, rgba(74,144,217,0.05), transparent 40%);
+  }
+  h1,h2,h3, .display{ font-family:'Space Grotesk', sans-serif; }
+
+  header{
+    position: sticky; top:0; z-index: 20;
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 16px 26px;
+    background: rgba(20,24,28,0.94);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap; gap: 12px;
+  }
+  .brand{ display:flex; align-items:center; gap: 12px; }
+  .brand .mark{
+    width: 34px; height:34px; border-radius:7px;
+    background: linear-gradient(135deg, var(--amber), #d4881a);
+    display:flex; align-items:center; justify-content:center;
+    font-family:'Space Grotesk', sans-serif; font-weight:700; color:#14181C; font-size:16px;
+  }
+  .brand .title{ font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:17px; letter-spacing:0.2px; }
+  .brand .sub{ font-size:11px; color:var(--text-dim); letter-spacing: 1.5px; text-transform:uppercase; margin-top:1px;}
+
+  .tabs{ display:flex; gap:6px; }
+  .tab{
+    font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px;
+    padding: 9px 16px; border-radius:8px; cursor:pointer; color:var(--text-dim);
+    border: 1px solid transparent;
+  }
+  .tab.active{ background: var(--panel); border-color:var(--border); color: var(--text); }
+
+  .btn-new{
+    background: var(--amber);
+    color:#1a1400;
+    border:none;
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:700;
+    font-size: 13px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    cursor:pointer;
+    letter-spacing:0.3px;
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .btn-new:hover{ transform: translateY(-1px); box-shadow: 0 6px 18px rgba(245,166,35,0.25); }
+  .btn-new:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible{
+    outline: 2px solid var(--amber); outline-offset: 2px;
+  }
+
+  main{ padding: 22px 24px 60px; max-width: 1400px; margin: 0 auto; }
+  .view{ display:none; }
+  .view.active{ display:block; }
+
+  .filters{ display:flex; gap:10px; margin-bottom:18px; flex-wrap:wrap; align-items:center; }
+  .filters select, .filters input{
+    background: var(--panel); border:1px solid var(--border); color:var(--text);
+    padding: 9px 12px; border-radius: 8px; font-family:'IBM Plex Mono',monospace; font-size:12.5px;
+  }
+  .filters .fchip{
+    border:1px solid var(--border); background: var(--panel); color:var(--text-dim);
+    font-family:'IBM Plex Mono',monospace; font-size:12px; padding:7px 12px; border-radius:20px; cursor:pointer;
+  }
+  .filters .fchip.active{ border-color: var(--amber); color: var(--amber); background: rgba(245,166,35,0.08); }
+  .filters .clear{ font-size:11.5px; color:var(--text-dim); text-decoration:underline; cursor:pointer; }
+
+  .table-wrap{
+    background: var(--panel); border:1px solid var(--border); border-radius: 12px; overflow: hidden;
+  }
+  table{ width:100%; border-collapse: collapse; font-size: 12.5px; }
+  thead th{
+    text-align:left; padding: 12px 14px; font-family:'Space Grotesk',sans-serif; font-size:11px;
+    text-transform:uppercase; letter-spacing:0.5px; color: var(--text-dim); border-bottom:1px solid var(--border);
+    background: var(--panel-2); white-space:nowrap;
+  }
+  tbody td{ padding: 11px 14px; border-bottom:1px solid var(--border); vertical-align: middle; }
+  tbody tr:last-child td{ border-bottom:none; }
+  tbody tr:hover{ background: rgba(255,255,255,0.02); }
+  .pill{ font-size:10px; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:0.4px; font-weight:600; white-space:nowrap; }
+  .pill.deploy{ color: var(--blue); background: rgba(74,144,217,0.12); }
+  .pill.collect{ color: var(--sage); background: rgba(107,144,128,0.15); }
+  .waste-dot{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .waste-dot.carton{ background: var(--carton); }
+  .waste-dot.plastic{ background: var(--plastic); }
+  .waste-dot.metal{ background: var(--metal); }
+  .waste-dot.general{ background: var(--general); }
+  .row-del{ background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:13px; }
+  .row-del:hover{ color: var(--red); }
+  .empty-state{ text-align:center; padding:50px 20px; color:var(--text-dim); font-size:13px; }
+
+  .bin-grid{ display:grid; grid-template-columns: repeat(auto-fill, minmax(240px,1fr)); gap:12px; }
+  .bin-card{
+    background: var(--panel); border:1px solid var(--border); border-left:4px solid var(--metal);
+    border-radius:10px; padding:14px 15px;
+  }
+  .bin-card[data-waste="carton"]{ border-left-color: var(--carton); }
+  .bin-card[data-waste="plastic"]{ border-left-color: var(--plastic); }
+  .bin-card[data-waste="metal"]{ border-left-color: var(--metal); }
+  .bin-card[data-waste="general"]{ border-left-color: var(--general); }
+  .bin-card .bnum{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15px; }
+  .bin-card .status{ margin-top:6px; }
+  .bin-card .meta{ font-size:11.5px; color:var(--text-dim); margin-top:9px; line-height:1.7; }
+  .bin-card .meta b{ color:var(--text); font-weight:500; }
+
+  .overlay{
+    position:fixed; inset:0; background: rgba(10,12,14,0.65);
+    display:none; align-items:center; justify-content:center; z-index: 50; padding: 20px;
+  }
+  .overlay.show{ display:flex; }
+  .modal{
+    background: var(--panel); border:1px solid var(--border); border-radius: 14px;
+    width: 100%; max-width: 460px; max-height: 88vh; overflow-y:auto;
+    padding: 22px 22px 20px; position:relative;
+  }
+  .modal h2{ font-size:17px; margin-bottom: 4px; }
+  .modal .hint{ font-size:11.5px; color:var(--text-dim); margin-bottom:18px; }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:11px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-dim); margin-bottom:6px; }
+  .field select, .field input, .field textarea{
+    width:100%; background:#181D22; border:1px solid var(--border); color:var(--text);
+    padding:10px 11px; border-radius:7px; font-family:'IBM Plex Mono',monospace; font-size:13px;
+  }
+  .field textarea{ resize:vertical; min-height:50px; }
+  .waste-grid, .action-grid{ display:grid; grid-template-columns: repeat(4,1fr); gap:8px; }
+  .action-grid{ grid-template-columns: repeat(2,1fr); }
+  .waste-opt, .action-opt{
+    border:1px solid var(--border); background:#181D22; border-radius:8px; padding:9px 4px;
+    text-align:center; font-size:11.5px; cursor:pointer; color:var(--text-dim);
+  }
+  .waste-opt.sel, .action-opt.sel{ border-color: var(--amber); color: var(--amber); background: rgba(245,166,35,0.08); }
+  .modal-actions{ display:flex; gap:8px; margin-top:18px; }
+  .modal-actions button{
+    flex:1; padding:11px; border-radius:8px; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; cursor:pointer;
+  }
+  .btn-cancel{ background:transparent; border:1px solid var(--border); color:var(--text-dim); }
+  .btn-save{ background: var(--amber); border:none; color:#1a1400; }
+  .close-x{ position:absolute; top:16px; right:18px; background:none; border:none; color:var(--text-dim); font-size:18px; cursor:pointer; }
+
+  .toast{
+    position:fixed; bottom:22px; left:50%; transform:translateX(-50%);
+    background: var(--panel-2); border:1px solid var(--border); color:var(--text);
+    padding: 11px 18px; border-radius:9px; font-size:12.5px; z-index:60;
+    opacity:0; pointer-events:none; transition: opacity .2s ease, transform .2s ease;
+  }
+  .toast.show{ opacity:1; transform: translateX(-50%) translateY(-4px); }
+  .loading{ text-align:center; padding:60px 0; color:var(--text-dim); font-size:13px; }
+</style>
 </head>
 <body>
-  <h1>Logistic Portal — Coming Soon</h1>
-  <p>JK Klang Recycle</p>
+
+<header>
+  <div class="brand">
+    <div class="mark">RR</div>
+    <div>
+      <div class="title">JK Klang Logistics</div>
+      <div class="sub">Trip Log</div>
+    </div>
+  </div>
+  <div class="tabs">
+    <div class="tab active" data-view="log">Trip Log</div>
+    <div class="tab" data-view="bins">Bin Tracker</div>
+  </div>
+  <button class="btn-new" id="openNew">+ New Trip Entry</button>
+</header>
+
+<main>
+
+  <div class="view active" id="view-log">
+    <div class="filters">
+      <input type="date" id="filt-date" title="Filter by date">
+      <select id="filt-driver"><option value="">All drivers</option></select>
+      <select id="filt-client"><option value="">All customers</option></select>
+      <span class="fchip active" data-action="all">All</span>
+      <span class="fchip" data-action="deploy">Deployed</span>
+      <span class="fchip" data-action="collect">Collected</span>
+      <span class="clear" id="clearFilters">Clear filters</span>
+    </div>
+    <div id="loading" class="loading">Loading trip log…</div>
+    <div class="table-wrap" id="tableWrap" style="display:none;">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th><th>Customer</th><th>Site</th><th>Lorry No.</th><th>Bin No.</th>
+            <th>Driver</th><th>Waste</th><th>Action</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="view" id="view-bins">
+    <div class="filters">
+      <span class="fchip active" data-binstatus="all">All bins</span>
+      <span class="fchip" data-binstatus="deploy">Currently at site</span>
+      <span class="fchip" data-binstatus="collect">Picked up</span>
+    </div>
+    <div class="bin-grid" id="binGrid"></div>
+  </div>
+
+</main>
+
+<div class="overlay" id="newOverlay">
+  <div class="modal">
+    <button class="close-x" id="closeNew">✕</button>
+    <h2>New trip entry</h2>
+    <div class="hint">Log a bin deployment or pickup trip.</div>
+
+    <div class="field">
+      <label>Action</label>
+      <div class="action-grid" id="f-action">
+        <div class="action-opt" data-v="deploy">Deploy bin</div>
+        <div class="action-opt" data-v="collect">Collect bin</div>
+      </div>
+    </div>
+    <div class="field">
+      <label>Trip date</label>
+      <input type="date" id="f-date">
+    </div>
+    <div class="field">
+      <label>Customer</label>
+      <select id="f-client">
+        <option value="">Select customer…</option>
+        <option value="__new__">+ Add new customer…</option>
+      </select>
+    </div>
+    <div id="f-newclient-wrap" style="display:none;">
+      <div class="field"><label>New customer name</label><input type="text" id="f-newclient-name" placeholder="Company name"></div>
+      <div class="field"><label>Contact name (optional)</label><input type="text" id="f-newclient-contact" placeholder="PIC name"></div>
+      <div class="field"><label>Contact phone (optional)</label><input type="text" id="f-newclient-phone" placeholder="+60…"></div>
+    </div>
+    <div class="field">
+      <label>Site</label>
+      <select id="f-site"><option value="">Select customer first…</option></select>
+    </div>
+    <div id="f-newsite-wrap" style="display:none;">
+      <div class="field"><label>New site name</label><input type="text" id="f-newsite-name" placeholder="e.g. Warehouse 3"></div>
+      <div class="field"><label>City (optional)</label><input type="text" id="f-newsite-city" placeholder="City"></div>
+      <div class="field"><label>State (optional)</label><input type="text" id="f-newsite-state" placeholder="State"></div>
+    </div>
+    <div class="field">
+      <label>Lorry number</label>
+      <input type="text" id="f-lorry" placeholder="e.g. WXY 1234">
+    </div>
+    <div class="field">
+      <label>Bin number</label>
+      <input type="text" id="f-bin" placeholder="e.g. RR-014">
+    </div>
+    <div class="field">
+      <label>Driver name</label>
+      <input type="text" id="f-driver" placeholder="Driver name">
+    </div>
+    <div class="field">
+      <label>Type of waste</label>
+      <div class="waste-grid" id="f-waste">
+        <div class="waste-opt" data-v="carton">Carton</div>
+        <div class="waste-opt" data-v="plastic">Plastic</div>
+        <div class="waste-opt" data-v="metal">Metal</div>
+        <div class="waste-opt" data-v="general">General</div>
+      </div>
+    </div>
+    <div class="field">
+      <label>Notes (optional)</label>
+      <textarea id="f-notes" placeholder="Access instructions, contact person, etc."></textarea>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelNew">Cancel</button>
+      <button class="btn-save" id="saveNew">Log trip</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SUPABASE_URL = "https://gogzpboccdkdzulmffvb.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdvZ3pwYm9jY2RrZHp1bG1mZnZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyMTE4MjQsImV4cCI6MjEwMjc4NzgyNH0.7xXwQBT1Mnlq9WSinMY-KQIajHpyVI06hW2vt4sZYvY";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let CLIENTS = [];
+let SITES = [];
+let TRIPS = [];
+let newWasteSelection = null;
+let newActionSelection = null;
+let filterAction = 'all';
+let filterBinStatus = 'all';
+
+const $ = (id) => document.getElementById(id);
+
+function toast(msg){
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=> t.classList.remove('show'), 2400);
+}
+function fmtDate(dateStr){
+  if(!dateStr) return '—';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
+}
+function clientName(id){ const c = CLIENTS.find(x=>x.id===id); return c ? c.name : '—'; }
+function siteName(id){ const s = SITES.find(x=>x.id===id); return s ? s.site_name : '—'; }
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    $('view-' + tab.dataset.view).classList.add('active');
+    if(tab.dataset.view === 'bins') renderBins();
+  });
+});
+
+async function loadAll(){
+  const [{data: clients, error: ce}, {data: sites, error: se}, {data: trips, error: te}] = await Promise.all([
+    sb.from('logistics_clients').select('id,name').order('name'),
+    sb.from('logistics_sites').select('id,client_id,site_name,city,state'),
+    sb.from('trip_log').select('*').order('trip_date', {ascending:false}).order('created_at', {ascending:false})
+  ]);
+  if(ce||se||te){ console.error(ce,se,te); toast('Error loading data — check console'); return; }
+  CLIENTS = clients || [];
+  SITES = sites || [];
+  TRIPS = trips || [];
+  populateFilterSelects();
+  renderLog();
+}
+
+function populateFilterSelects(){
+  const driverSel = $('filt-driver');
+  const currentDriver = driverSel.value;
+  const drivers = [...new Set(TRIPS.map(t=>t.driver_name).filter(Boolean))].sort();
+  driverSel.innerHTML = '<option value="">All drivers</option>' + drivers.map(d=>`<option value="${d}">${d}</option>`).join('');
+  driverSel.value = currentDriver;
+
+  const clientSel = $('filt-client');
+  const currentClient = clientSel.value;
+  clientSel.innerHTML = '<option value="">All customers</option>' + CLIENTS.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+  clientSel.value = currentClient;
+}
+
+function renderLog(){
+  $('loading').style.display = 'none';
+  $('tableWrap').style.display = 'block';
+
+  const dateFilter = $('filt-date').value;
+  const driverFilter = $('filt-driver').value;
+  const clientFilter = $('filt-client').value;
+
+  const rows = TRIPS.filter(t => {
+    if(dateFilter && t.trip_date !== dateFilter) return false;
+    if(driverFilter && t.driver_name !== driverFilter) return false;
+    if(clientFilter && t.client_id !== clientFilter) return false;
+    if(filterAction !== 'all' && t.action !== filterAction) return false;
+    return true;
+  });
+
+  const body = $('logBody');
+  if(rows.length === 0){
+    body.innerHTML = '<tr><td colspan="9"><div class="empty-state">No trips match these filters</div></td></tr>';
+    return;
+  }
+
+  body.innerHTML = rows.map(t => `
+    <tr>
+      <td>${fmtDate(t.trip_date)}</td>
+      <td>${clientName(t.client_id)}</td>
+      <td>${siteName(t.site_id)}</td>
+      <td>${t.lorry_number || '—'}</td>
+      <td>${t.bin_number}</td>
+      <td>${t.driver_name || '—'}</td>
+      <td><span class="waste-dot ${t.waste_type}"></span>${t.waste_type}</td>
+      <td><span class="pill ${t.action}">${t.action === 'deploy' ? 'Deployed' : 'Collected'}</span></td>
+      <td><button class="row-del" data-id="${t.id}" title="Delete entry">✕</button></td>
+    </tr>
+  `).join('');
+
+  body.querySelectorAll('.row-del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if(!confirm('Delete this trip entry? This cannot be undone.')) return;
+      const { error } = await sb.from('trip_log').delete().eq('id', btn.dataset.id);
+      if(error){ console.error(error); toast('Failed to delete'); return; }
+      toast('Entry deleted');
+      await loadAll();
+    });
+  });
+}
+
+['filt-date','filt-driver','filt-client'].forEach(id => $(id).addEventListener('change', renderLog));
+document.querySelectorAll('[data-action]').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('[data-action]').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    filterAction = chip.dataset.action;
+    renderLog();
+  });
+});
+$('clearFilters').addEventListener('click', () => {
+  $('filt-date').value=''; $('filt-driver').value=''; $('filt-client').value='';
+  filterAction = 'all';
+  document.querySelectorAll('[data-action]').forEach(c=>c.classList.remove('active'));
+  document.querySelector('[data-action="all"]').classList.add('active');
+  renderLog();
+});
+
+document.querySelectorAll('[data-binstatus]').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('[data-binstatus]').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    filterBinStatus = chip.dataset.binstatus;
+    renderBins();
+  });
+});
+
+function renderBins(){
+  const byBin = {};
+  TRIPS.forEach(t => {
+    const key = t.bin_number;
+    if(!byBin[key]) { byBin[key] = t; return; }
+    const cur = byBin[key];
+    if(t.trip_date > cur.trip_date || (t.trip_date === cur.trip_date && t.created_at > cur.created_at)){
+      byBin[key] = t;
+    }
+  });
+  let bins = Object.values(byBin);
+  if(filterBinStatus !== 'all') bins = bins.filter(b => b.action === filterBinStatus);
+  bins.sort((a,b) => a.bin_number.localeCompare(b.bin_number));
+
+  const grid = $('binGrid');
+  if(bins.length === 0){
+    grid.innerHTML = '<div class="empty-state">No bins logged yet</div>';
+    return;
+  }
+  grid.innerHTML = bins.map(b => `
+    <div class="bin-card" data-waste="${b.waste_type}">
+      <div class="bnum">${b.bin_number}</div>
+      <div class="status"><span class="pill ${b.action}">${b.action === 'deploy' ? 'At site' : 'Picked up'}</span></div>
+      <div class="meta">
+        <b>${clientName(b.client_id)}</b><br>
+        ${siteName(b.site_id)}<br>
+        <span class="waste-dot ${b.waste_type}"></span>${b.waste_type}<br>
+        Last trip: ${fmtDate(b.trip_date)}${b.driver_name ? ' · ' + b.driver_name : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function populateClientSelect(){
+  $('f-client').innerHTML = '<option value="">Select customer…</option>' +
+    CLIENTS.map(c => `<option value="${c.id}">${c.name}</option>`).join('') +
+    '<option value="__new__">+ Add new customer…</option>';
+}
+function refreshSiteSelect(clientId){
+  const opts = SITES.filter(s => s.client_id === clientId);
+  $('f-site').disabled = false;
+  $('f-site').innerHTML = (opts.length
+    ? '<option value="">Select site…</option>' + opts.map(s => `<option value="${s.id}">${s.site_name}${s.city ? ' — '+s.city : ''}</option>`).join('')
+    : '<option value="">No sites yet for this customer</option>') +
+    '<option value="__new__">+ Add new site…</option>';
+}
+$('f-client').addEventListener('change', () => {
+  const val = $('f-client').value;
+  $('f-newclient-wrap').style.display = val === '__new__' ? 'block' : 'none';
+  if(val === '__new__'){
+    $('f-site').innerHTML = '<option value="">Will create with new customer…</option>';
+    $('f-site').disabled = true;
+    $('f-newsite-wrap').style.display = 'block';
+  } else if(val){
+    $('f-newsite-wrap').style.display = 'none';
+    refreshSiteSelect(val);
+  } else {
+    $('f-site').disabled = false;
+    $('f-site').innerHTML = '<option value="">Select customer first…</option>';
+    $('f-newsite-wrap').style.display = 'none';
+  }
+});
+$('f-site').addEventListener('change', () => {
+  $('f-newsite-wrap').style.display = $('f-site').value === '__new__' ? 'block' : 'none';
+});
+
+document.querySelectorAll('#f-waste .waste-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    document.querySelectorAll('#f-waste .waste-opt').forEach(o=>o.classList.remove('sel'));
+    opt.classList.add('sel');
+    newWasteSelection = opt.dataset.v;
+  });
+});
+document.querySelectorAll('#f-action .action-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    document.querySelectorAll('#f-action .action-opt').forEach(o=>o.classList.remove('sel'));
+    opt.classList.add('sel');
+    newActionSelection = opt.dataset.v;
+  });
+});
+
+function todayISO(){ return new Date().toISOString().slice(0,10); }
+
+$('openNew').addEventListener('click', () => {
+  populateClientSelect();
+  $('f-site').innerHTML = '<option value="">Select customer first…</option>';
+  $('f-site').disabled = false;
+  $('f-date').value = todayISO();
+  $('f-lorry').value=''; $('f-bin').value=''; $('f-driver').value=''; $('f-notes').value='';
+  $('f-newclient-name').value=''; $('f-newclient-contact').value=''; $('f-newclient-phone').value='';
+  $('f-newsite-name').value=''; $('f-newsite-city').value=''; $('f-newsite-state').value='';
+  $('f-newclient-wrap').style.display='none'; $('f-newsite-wrap').style.display='none';
+  newWasteSelection = null; newActionSelection = 'deploy';
+  document.querySelectorAll('#f-waste .waste-opt').forEach(o=>o.classList.remove('sel'));
+  document.querySelectorAll('#f-action .action-opt').forEach(o=>o.classList.remove('sel'));
+  document.querySelector('#f-action .action-opt[data-v="deploy"]').classList.add('sel');
+  $('newOverlay').classList.add('show');
+});
+$('closeNew').addEventListener('click', () => $('newOverlay').classList.remove('show'));
+$('cancelNew').addEventListener('click', () => $('newOverlay').classList.remove('show'));
+
+$('saveNew').addEventListener('click', async () => {
+  if(!newActionSelection){ toast('Select deploy or collect'); return; }
+  if(!$('f-date').value){ toast('Select a trip date'); return; }
+  if(!$('f-bin').value.trim()){ toast('Enter the bin number'); return; }
+  if(!newWasteSelection){ toast('Select the waste type'); return; }
+
+  let clientId = $('f-client').value;
+  let siteId = $('f-site').value;
+  if(!clientId){ toast('Select or add a customer'); return; }
+
+  if(clientId === '__new__'){
+    const name = $('f-newclient-name').value.trim();
+    if(!name){ toast('Enter the new customer name'); return; }
+    const { data, error } = await sb.from('logistics_clients').insert({
+      name,
+      contact_name: $('f-newclient-contact').value || null,
+      contact_phone: $('f-newclient-phone').value || null
+    }).select().single();
+    if(error){ console.error(error); toast('Failed to create customer'); return; }
+    clientId = data.id;
+    CLIENTS.push(data);
+    siteId = '__new__';
+  }
+
+  if(!siteId){ toast('Select or add a site'); return; }
+
+  if(siteId === '__new__'){
+    const siteNameVal = $('f-newsite-name').value.trim();
+    if(!siteNameVal){ toast('Enter the new site name'); return; }
+    const { data, error } = await sb.from('logistics_sites').insert({
+      client_id: clientId,
+      site_name: siteNameVal,
+      city: $('f-newsite-city').value || null,
+      state: $('f-newsite-state').value || null
+    }).select().single();
+    if(error){ console.error(error); toast('Failed to create site'); return; }
+    siteId = data.id;
+    SITES.push(data);
+  }
+
+  const payload = {
+    trip_date: $('f-date').value,
+    client_id: clientId,
+    site_id: siteId,
+    lorry_number: $('f-lorry').value || null,
+    bin_number: $('f-bin').value.trim(),
+    driver_name: $('f-driver').value || null,
+    waste_type: newWasteSelection,
+    action: newActionSelection,
+    notes: $('f-notes').value || null
+  };
+  const { error } = await sb.from('trip_log').insert(payload);
+  if(error){ console.error(error); toast('Failed to save — check console'); return; }
+  toast('Trip logged');
+  $('newOverlay').classList.remove('show');
+  await loadAll();
+});
+
+$('newOverlay').addEventListener('click', (e) => { if(e.target === $('newOverlay')) $('newOverlay').classList.remove('show'); });
+
+loadAll();
+</script>
 </body>
 </html>
