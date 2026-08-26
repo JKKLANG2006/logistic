@@ -40,7 +40,7 @@
   #appShell{ display:none; }
   header{
     position: sticky; top:0; z-index: 20; display:flex; align-items:center; justify-content:space-between;
-    padding: 14px 26px; background: rgba(20,24,28,0.94); backdrop-filter: blur(8px);
+    padding: 14px 26px; background: rgba(243,241,236,0.94); backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 12px;
   }
   .brand{ display:flex; align-items:center; gap: 12px; }
@@ -110,6 +110,12 @@
   .bin-card .status{ margin-top:6px; }
   .bin-card .meta{ font-size:11.5px; color:var(--text-dim); margin-top:9px; line-height:1.7; }
   .bin-card .meta b{ color:var(--text); font-weight:500; }
+  .bin-card.leaking{ border-color: var(--red); background: rgba(196,68,31,0.05); }
+  .bin-card.leaking .bnum{ color: var(--red); }
+  .leak-badge{ display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:700; color: var(--red); background: rgba(196,68,31,0.12); padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:0.4px; margin-top:6px; }
+  .ack-btn{ background: var(--red); color:#fff; border:none; border-radius:6px; padding:6px 10px; font-size:10.5px; cursor:pointer; margin-top:8px; font-weight:600; }
+  .ack-btn:hover{ opacity:0.9; }
+  .ack-log{ font-size:10.5px; color:var(--text-dim); margin-top:6px; border-top:1px solid var(--border); padding-top:6px; }
 
   .section-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px; }
   .section-head h2{ font-size:16px; }
@@ -219,6 +225,7 @@
       <span class="fchip active" data-binstatus="all">All bins</span>
       <span class="fchip" data-binstatus="deploy">Currently at site</span>
       <span class="fchip" data-binstatus="collect">Picked up</span>
+      <span class="fchip" data-binstatus="leakage" id="leakageChip" style="display:none;">⚠ Possible leakage (7+ days)</span>
     </div>
     <div class="bin-grid" id="binGrid"></div>
   </div>
@@ -335,6 +342,7 @@ let editingTripId = null;
 
 function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2400); }
 function fmtDate(d){ if(!d) return '—'; return new Date(d+'T00:00:00').toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
+function daysSince(dateStr){ if(!dateStr) return 0; const d=new Date(dateStr+'T00:00:00'); return Math.floor((Date.now()-d.getTime())/86400000); }
 function fmtDateTime(ts){ if(!ts) return '—'; const d=new Date(ts); return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) + ' ' + d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}); }
 function clientName(id){ const c=CLIENTS.find(x=>x.id===id); return c?c.name:'—'; }
 function siteName(id){ const s=SITES.find(x=>x.id===id); return s?s.site_name:'—'; }
@@ -349,6 +357,8 @@ function canEdit(){ return isMaster() || isChecker(); }
 function canDelete(){ return isMaster(); }
 function canReviewToggle(){ return isMaster() || isReviewer(); }
 function canSeeAudit(){ return isMaster(); }
+function canSeeLeakage(){ return isMaster() || isChecker() || isReviewer(); }
+const LEAKAGE_THRESHOLD_DAYS = 7;
 
 async function logAudit(action_type, target_name, details){
   await sb.from('logistics_audit_logs').insert({
@@ -431,6 +441,7 @@ function enterApp(){
   $('staffTab').style.display = isMaster() ? 'block' : 'none';
   $('auditTab').style.display = canSeeAudit() ? 'block' : 'none';
   $('openNew').style.display = canCreate() ? 'inline-block' : 'none';
+  $('leakageChip').style.display = canSeeLeakage() ? 'inline-block' : 'none';
   renderEntitySwitcher();
   loadAll();
 }
@@ -463,12 +474,12 @@ $('logoutBtn').addEventListener('click', async () => {
 
 // ===== Tabs =====
 document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
+  tab.addEventListener('click', async () => {
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     tab.classList.add('active');
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     $('view-' + tab.dataset.view).classList.add('active');
-    if(tab.dataset.view === 'bins') renderBins();
+    if(tab.dataset.view === 'bins') { await loadLeakageAcks(); renderBins(); }
     if(tab.dataset.view === 'audit') renderAudit();
     if(tab.dataset.view === 'staff') renderStaff();
   });
@@ -490,7 +501,7 @@ async function loadAll(){
   if(canSeeAudit()){ const ares = results[3]; if(ares.error){ console.error(ares.error); } AUDIT = ares.data||[]; }
   populateFilterSelects();
   renderLog();
-  if($('view-bins').classList.contains('active')) renderBins();
+  if($('view-bins').classList.contains('active')) { await loadLeakageAcks(); renderBins(); }
   if($('view-audit').classList.contains('active')) renderAudit();
   if($('view-staff').classList.contains('active')) renderStaff();
 }
@@ -613,8 +624,7 @@ $('exportPdf').addEventListener('click', async () => {
     t.action==='deploy'?'Deployed':'Collected', t.logged_by||'—', t.reviewed?'Yes':'No'
   ]);
   doc.autoTable({ startY: 28, head: [['Date','Customer','Site','Lorry No.','Bin No.','Driver','Waste','Action','Logged by','Reviewed']], body, styles:{fontSize:8}, headStyles:{fillColor:[30,36,41]} });
-  const fname = dateFilter ? `trip-list-${dateFilter}.pdf` : `trip-list-${todayISO()}.pdf`;
-  doc.save(fname);
+  window.open(doc.output('bloburl'), '_blank');
   await logAudit('export_pdf', dateFilter || 'all dates', `Exported ${rows.length} trip record(s) to PDF`);
 });
 
@@ -629,7 +639,7 @@ $('exportAuditPdf').addEventListener('click', async () => {
   doc.text(`Generated ${fmtDateTime(new Date().toISOString())}`, 14, 22);
   const body = AUDIT.map(a => [fmtDateTime(a.created_at), a.actor_name||'—', a.actor_role||'—', a.action_type, a.target_name||'—', a.details||'—']);
   doc.autoTable({ startY: 28, head: [['Time','Staff','Role','Action','Target','Details']], body, styles:{fontSize:8}, headStyles:{fillColor:[30,36,41]} });
-  doc.save(`audit-trail-${todayISO()}.pdf`);
+  window.open(doc.output('bloburl'), '_blank');
   await logAudit('export_audit_pdf', entityName(ACTIVE_ENTITY_ID), `Exported ${AUDIT.length} audit record(s) to PDF`);
 });
 
@@ -640,6 +650,18 @@ document.querySelectorAll('[data-binstatus]').forEach(chip => {
     chip.classList.add('active'); filterBinStatus = chip.dataset.binstatus; renderBins();
   });
 });
+let LEAKAGE_ACKS = [];
+
+async function loadLeakageAcks(){
+  if(!canSeeLeakage()) { LEAKAGE_ACKS = []; return; }
+  const { data, error } = await sb.from('bin_leakage_acks').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('created_at', {ascending:false});
+  if(error){ console.error(error); return; }
+  LEAKAGE_ACKS = data || [];
+}
+function lastAckFor(binNumber){
+  return LEAKAGE_ACKS.find(a => a.bin_number === binNumber);
+}
+
 function renderBins(){
   const byBin = {};
   TRIPS.forEach(t => {
@@ -649,18 +671,45 @@ function renderBins(){
     if(t.trip_date > cur.trip_date || (t.trip_date===cur.trip_date && t.created_at>cur.created_at)) byBin[key]=t;
   });
   let bins = Object.values(byBin);
-  if(filterBinStatus!=='all') bins = bins.filter(b=>b.action===filterBinStatus);
+  bins = bins.map(b => ({ ...b, _isLeaking: b.action==='deploy' && daysSince(b.trip_date) >= LEAKAGE_THRESHOLD_DAYS }));
+
+  if(filterBinStatus==='leakage') bins = bins.filter(b=>b._isLeaking);
+  else if(filterBinStatus!=='all') bins = bins.filter(b=>b.action===filterBinStatus);
   bins.sort((a,b)=>a.bin_number.localeCompare(b.bin_number));
+
   const grid = $('binGrid');
-  if(bins.length===0){ grid.innerHTML='<div class="empty-state">No bins logged yet</div>'; return; }
-  grid.innerHTML = bins.map(b => `
-    <div class="bin-card" data-waste="${b.waste_type}">
+  if(bins.length===0){ grid.innerHTML='<div class="empty-state">No bins match this view</div>'; return; }
+  grid.innerHTML = bins.map(b => {
+    const ds = daysSince(b.trip_date);
+    const ack = lastAckFor(b.bin_number);
+    return `
+    <div class="bin-card ${b._isLeaking?'leaking':''}" data-waste="${b.waste_type}">
       <div class="bnum">${b.bin_number}</div>
       <div class="status"><span class="pill ${b.action}">${b.action==='deploy'?'At site':'Picked up'}</span></div>
+      ${b._isLeaking ? `<div class="leak-badge">⚠ ${ds} days at site</div>` : ''}
       <div class="meta"><b>${clientName(b.client_id)}</b><br>${siteName(b.site_id)}<br>
       <span class="waste-dot ${b.waste_type}"></span>${b.waste_type}<br>
       Last trip: ${fmtDate(b.trip_date)}${b.driver_name?' · '+b.driver_name:''}</div>
-    </div>`).join('');
+      ${b._isLeaking && canSeeLeakage() ? `<button class="ack-btn" data-bin="${b.bin_number}" data-client="${b.client_id}" data-site="${b.site_id}" data-days="${ds}">Acknowledge</button>` : ''}
+      ${ack ? `<div class="ack-log">Last acknowledged by <b>${ack.acknowledged_by}</b> (${ack.acknowledged_by_role})<br>${fmtDateTime(ack.created_at)}${ack.note ? ' — '+ack.note : ''}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  grid.querySelectorAll('.ack-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const note = prompt('Optional note about this bin (e.g. "Customer confirmed still in use", "Following up with driver")') || null;
+      const { error } = await sb.from('bin_leakage_acks').insert({
+        entity_id: ACTIVE_ENTITY_ID, bin_number: btn.dataset.bin, client_id: btn.dataset.client || null,
+        site_id: btn.dataset.site || null, days_at_time: parseInt(btn.dataset.days,10),
+        acknowledged_by: CURRENT_USER.name, acknowledged_by_role: CURRENT_USER.role, note
+      });
+      if(error){ console.error(error); toast('Failed to record acknowledgment'); return; }
+      await logAudit('acknowledge_leakage', btn.dataset.bin, `Acknowledged ${btn.dataset.days}-day standing bin${note?': '+note:''}`);
+      toast('Acknowledgment recorded');
+      await loadLeakageAcks();
+      renderBins();
+    });
+  });
 }
 
 // ===== Audit Trail (master admin only) =====
