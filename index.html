@@ -391,7 +391,7 @@
         <div class="waste-opt" data-v="carton">Carton</div>
         <div class="waste-opt" data-v="plastic">Plastic</div>
         <div class="waste-opt" data-v="metal">Metal</div>
-        <div class="waste-opt" data-v="general">General</div>
+        <div class="waste-opt" data-v="general">Rubbish</div>
       </div>
     </div>
     <div id="f-newsite-optional-wrap" style="display:none;">
@@ -506,7 +506,7 @@
         <div class="waste-opt" data-v="carton">Carton</div>
         <div class="waste-opt" data-v="plastic">Plastic</div>
         <div class="waste-opt" data-v="metal">Metal</div>
-        <div class="waste-opt" data-v="general">General</div>
+        <div class="waste-opt" data-v="general">Rubbish</div>
       </div>
     </div>
     <div class="field"><label>Size (optional)</label><input type="text" id="br-size" placeholder="e.g. 20 cubic yard"></div>
@@ -1449,7 +1449,7 @@ $('addCustomerSite').addEventListener('click', async () => {
 });
 
 // ===== Excel template download + offline bulk import =====
-const IMPORT_HEADERS = ['Trip Date (YYYY-MM-DD)','Action (Bin Out / Bin In)','Customer Name','Site Name','Lorry Number','Bin Number','Driver Name','Waste Type (Carton/Plastic/Metal/General)','Notes'];
+const IMPORT_HEADERS = ['Trip Date (YYYY-MM-DD)','Action (Bin Out / Bin In)','Customer Name','Site Name','Lorry Number','Bin Number','Driver Name','Waste Type (Carton/Plastic/Metal/Rubbish)','Notes'];
 
 $('downloadTemplate').addEventListener('click', () => {
   const exampleRow = [todayISO(), 'Bin Out', 'Radams Enterprise', 'Klang Utama', 'WXY 1234', 'RR-014', 'Rabbani', 'Carton', 'Optional notes'];
@@ -1462,7 +1462,7 @@ $('downloadTemplate').addEventListener('click', () => {
     ['1. Fill one row per trip. Keep the header row as-is.'],
     ['2. Trip Date must be in YYYY-MM-DD format, e.g. 2026-08-26.'],
     ['3. Action must be exactly "Bin Out" or "Bin In".'],
-    ['4. Waste Type must be exactly Carton, Plastic, Metal, or General.'],
+    ['4. Waste Type must be exactly Carton, Plastic, Metal, or Rubbish.'],
     ['5. Customer Name and Site Name are matched to existing records if they already exist, or created automatically if not.'],
     ['6. Bin Number is required. Lorry Number, Driver Name and Notes are optional.'],
     ['7. Save this file and upload it via "Import from Excel" once you have signal.']
@@ -1492,7 +1492,8 @@ function normalizeAction(v){
 }
 function normalizeWaste(v){
   const s = String(v||'').trim().toLowerCase();
-  if(['carton','plastic','metal','general'].includes(s)) return s;
+  if(['carton','plastic','metal'].includes(s)) return s;
+  if(s === 'rubbish' || s === 'general') return 'general';
   return null;
 }
 function normalizeDate(v){
@@ -1525,7 +1526,7 @@ $('importFileInput').addEventListener('change', async () => {
     if(!custName) errors.push('Customer name required');
     if(!siteNm) errors.push('Site name required');
     if(!bin) errors.push('Bin number required');
-    const waste = normalizeWaste(rawWaste); if(!waste) errors.push('Waste type must be Carton/Plastic/Metal/General');
+    const waste = normalizeWaste(rawWaste); if(!waste) errors.push('Waste type must be Carton/Plastic/Metal/Rubbish');
 
     return { rowNum: idx+2, tripDate, action, custName, siteNm, lorry, bin, driver, waste, notes, errors };
   });
