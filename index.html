@@ -66,6 +66,7 @@
   .tab[data-view="bins"]::before{ background: var(--sage); }
   .tab[data-view="maintenance"]::before{ background: var(--violet); }
   .tab[data-view="binregistry"]::before{ background: var(--carton); }
+  .tab[data-view="lorryregistry"]::before{ background: var(--metal); }
   .tab[data-view="customers"]::before{ background: var(--teal); }
   .tab[data-view="audit"]::before{ background: var(--red); }
   .tab[data-view="staff"]::before{ background: var(--pink); }
@@ -163,6 +164,15 @@
 
   .role-note{ font-size:11px; color:var(--text-dim); background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px 14px; margin-bottom:16px; }
 
+  .alerts-widget{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; align-items:stretch; }
+  .alert-card{ flex:1; min-width:160px; background: var(--panel); border:1px solid var(--border); border-left:4px solid var(--red); border-radius:10px; padding:12px 14px; cursor:pointer; }
+  .alert-card.ok{ border-left-color: var(--sage); }
+  .alert-card .an{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px; }
+  .alert-card.ok .an{ color: var(--sage); }
+  .alert-card:not(.ok) .an{ color: var(--red); }
+  .alert-card .al{ font-size:11px; color:var(--text-dim); margin-top:2px; }
+  .alerts-dismiss{ font-size:11px; color:var(--text-dim); text-decoration:underline; cursor:pointer; align-self:center; padding:0 6px; }
+
   .toast{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background: var(--panel-2); border:1px solid var(--border); color:var(--text); padding: 11px 18px; border-radius:9px; font-size:12.5px; z-index:60; opacity:0; pointer-events:none; transition: opacity .2s ease, transform .2s ease; }
   .toast.show{ opacity:1; transform: translateX(-50%) translateY(-4px); }
   .loading{ text-align:center; padding:60px 0; color:var(--text-dim); font-size:13px; }
@@ -219,6 +229,7 @@
     <div class="tab" data-view="bins">Bin Tracker</div>
     <div class="tab" data-view="maintenance">Maintenance</div>
     <div class="tab" data-view="binregistry">Bins</div>
+    <div class="tab" data-view="lorryregistry">Lorries</div>
     <div class="tab" data-view="customers" id="customersTab" style="display:none;">Customers</div>
     <div class="tab" data-view="audit" id="auditTab" style="display:none;">Audit Trail</div>
     <div class="tab" data-view="staff" id="staffTab" style="display:none;">Staff</div>
@@ -228,6 +239,7 @@
 
 <main>
   <div class="view active" id="view-log">
+    <div id="alertsWidget" style="display:none;"></div>
     <div class="role-note" id="roleNote"></div>
     <div class="filters">
       <input type="text" id="filt-search" placeholder="Search customer, site, bin, lorry, driver, notes…" style="width:260px;">
@@ -320,14 +332,31 @@
     </div>
   </div>
 
+  <div class="view" id="view-lorryregistry">
+    <div class="section-head">
+      <h2>Lorry Registry</h2>
+      <button class="btn-new" id="openNewLorry" style="display:none;">+ Register lorry</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Lorry No.</th><th>Default driver</th><th>Notes</th><th></th></tr></thead>
+        <tbody id="lorryRegistryBody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="view" id="view-customers">
     <div class="section-head">
       <h2>Customers</h2>
       <button class="btn-new" id="openNewCustomer">+ Add customer</button>
     </div>
+    <div class="filters">
+      <span class="fchip active" data-custfilter="all">All customers</span>
+      <span class="fchip" data-custfilter="inactive" id="custLeakageChip" style="display:none;">⚠ No orders 7+ days</span>
+    </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Customer</th><th>Contact name</th><th>Contact phone</th><th>Branches</th><th></th></tr></thead>
+        <thead><tr><th>Customer</th><th>Contact name</th><th>Contact phone</th><th>Branches</th><th>Last Order</th><th></th></tr></thead>
         <tbody id="customersBody"></tbody>
       </table>
     </div>
@@ -336,8 +365,10 @@
   <div class="view" id="view-audit">
     <div class="section-head">
       <h2>Audit trail</h2>
+      <button class="btn-ghost" id="exportFullBackup">⬇ Full Data Backup (Excel)</button>
       <button class="btn-ghost" id="exportAuditPdf">Export PDF</button>
     </div>
+    <div id="storageStatsWidget" class="role-note" style="display:none;"></div>
     <div class="filters">
       <input type="text" id="audit-filt-search" placeholder="Search staff, target, details…" style="width:220px;">
       <input type="date" id="audit-filt-date-from" title="From date">
@@ -514,6 +545,17 @@
   </div>
 </div>
 
+<div class="overlay" id="customerTraceOverlay">
+  <div class="modal" style="max-width:680px;">
+    <button class="close-x" id="closeCustomerTrace">✕</button>
+    <h2 id="customerTraceTitle">Customer Trace</h2>
+    <div id="customerTraceBody"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="closeCustomerTrace2">Close</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="maintenanceOverlay">
   <div class="modal">
     <button class="close-x" id="closeMaintenance">✕</button>
@@ -560,6 +602,21 @@
   </div>
 </div>
 
+<div class="overlay" id="lorryRegistryOverlay">
+  <div class="modal">
+    <button class="close-x" id="closeLorryRegistry">✕</button>
+    <h2 id="lorryRegistryModalTitle">Register lorry</h2>
+    <div class="hint">Adds this lorry to the master registry for this entity.</div>
+    <div class="field"><label>Lorry number</label><input type="text" id="lr-number" placeholder="e.g. WXY 1234"></div>
+    <div class="field"><label>Default driver (optional)</label><input type="text" id="lr-driver" placeholder="Auto-fills driver when this lorry is selected"></div>
+    <div class="field"><label>Notes (optional)</label><textarea id="lr-notes"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelLorryRegistry">Cancel</button>
+      <button class="btn-save" id="saveLorryRegistry">Register lorry</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="importExcelOverlay">
   <div class="modal" style="max-width:640px;">
     <button class="close-x" id="closeImportExcel">✕</button>
@@ -590,7 +647,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 
-let ENTITIES = [], CLIENTS = [], SITES = [], TRIPS = [], AUDIT = [], STAFF = [], MAINTENANCE = [];
+let ENTITIES = [], CLIENTS = [], SITES = [], TRIPS = [], AUDIT = [], STAFF = [], MAINTENANCE = [], LORRY_REGISTRY = [];
 let filterMStatus = 'all', editingMaintenanceId = null;
 let pendingPhotoFile = null, existingPhotoUrl = null, removeExistingPhoto = false;
 let newWasteSelection=null, newActionSelection=null, newStaffRole='maker';
@@ -706,6 +763,7 @@ function enterApp(){
   $('auditTab').style.display = canSeeAudit() ? 'block' : 'none';
   $('customersTab').style.display = canEdit() ? 'block' : 'none';
   $('openNewBin').style.display = (canEdit() || isMaker()) ? 'inline-block' : 'none';
+  $('openNewLorry').style.display = (canEdit() || isMaker()) ? 'inline-block' : 'none';
   $('openNew').style.display = canCreate() ? 'inline-block' : 'none';
   $('openNewMaintenance').style.display = canCreate() ? 'inline-block' : 'none';
   $('openImportExcel').style.display = canCreate() ? 'inline-block' : 'none';
@@ -781,8 +839,9 @@ document.querySelectorAll('.tab').forEach(tab => {
     if(tab.dataset.view === 'maintenance') { await loadMaintenance(); renderMaintenance(); }
     if(tab.dataset.view === 'audit') renderAudit();
     if(tab.dataset.view === 'staff') renderStaff();
-    if(tab.dataset.view === 'customers') renderCustomers();
+    if(tab.dataset.view === 'customers') { await loadCustomerLeakageAcks(); renderCustomers(); }
     if(tab.dataset.view === 'binregistry') { await loadBinRegistry(); renderBinRegistry(); }
+    if(tab.dataset.view === 'lorryregistry') { renderLorryRegistry(); }
   });
 });
 
@@ -793,21 +852,24 @@ async function loadAll(){
     sb.from('logistics_clients').select('id,name,contact_name,contact_phone').eq('entity_id', ACTIVE_ENTITY_ID).order('name'),
     sb.from('logistics_sites').select('id,client_id,site_name,city,state').eq('entity_id', ACTIVE_ENTITY_ID),
     sb.from('trip_log').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('trip_date', {ascending:false}).order('created_at', {ascending:false}),
-    sb.from('bin_maintenance').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('sent_date', {ascending:false}).order('created_at', {ascending:false})
+    sb.from('bin_maintenance').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('sent_date', {ascending:false}).order('created_at', {ascending:false}),
+    sb.from('lorry_registry').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('lorry_number')
   ];
   if(canSeeAudit()) queries.push(sb.from('logistics_audit_logs').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('created_at', {ascending:false}).limit(300));
   const results = await Promise.all(queries);
-  const [{data: clients, error: ce}, {data: sites, error: se}, {data: trips, error: te}, {data: maint, error: me}] = results;
-  if(ce||se||te||me){ console.error(ce,se,te,me); toast('Error loading data — check console'); return; }
-  CLIENTS = clients||[]; SITES = sites||[]; TRIPS = trips||[]; MAINTENANCE = maint||[];
-  if(canSeeAudit()){ const ares = results[4]; if(ares.error){ console.error(ares.error); } AUDIT = ares.data||[]; }
+  const [{data: clients, error: ce}, {data: sites, error: se}, {data: trips, error: te}, {data: maint, error: me}, {data: lorries, error: le}] = results;
+  if(ce||se||te||me||le){ console.error(ce,se,te,me,le); toast('Error loading data — check console'); return; }
+  CLIENTS = clients||[]; SITES = sites||[]; TRIPS = trips||[]; MAINTENANCE = maint||[]; LORRY_REGISTRY = lorries||[];
+  if(canSeeAudit()){ const ares = results[5]; if(ares.error){ console.error(ares.error); } AUDIT = ares.data||[]; }
   populateFilterSelects();
   renderLog();
+  renderAlertsWidget();
   if($('view-bins').classList.contains('active')) { await loadLeakageAcks(); renderBins(); }
   if($('view-audit').classList.contains('active')) renderAudit();
   if($('view-staff').classList.contains('active')) renderStaff();
-  if($('view-customers').classList.contains('active')) renderCustomers();
+  if($('view-customers').classList.contains('active')) { await loadCustomerLeakageAcks(); renderCustomers(); }
   if($('view-binregistry').classList.contains('active')) { await loadBinRegistry(); renderBinRegistry(); }
+  if($('view-lorryregistry').classList.contains('active')) renderLorryRegistry();
   if($('view-maintenance').classList.contains('active')) { await loadMaintenance(); renderMaintenance(); }
 }
 
@@ -1220,7 +1282,113 @@ function renderAudit(){
       <td>${a.target_name||'—'}</td>
       <td>${a.details||'—'}</td>
     </tr>`).join('');
+  loadStorageStats();
 }
+
+let storageStatsCache = null;
+async function loadStorageStats(){
+  if(!isMaster()) return;
+  const widget = $('storageStatsWidget');
+  widget.style.display = 'block';
+  widget.textContent = 'Loading photo storage usage…';
+  try{
+    let totalBytes = 0, totalFiles = 0;
+    for(const ent of ENTITIES){
+      const { data, error } = await sb.storage.from('trip-photos').list(ent.id, { limit: 1000 });
+      if(error) continue;
+      (data||[]).forEach(f => {
+        if(f.metadata && f.metadata.size){ totalBytes += f.metadata.size; totalFiles++; }
+      });
+    }
+    storageStatsCache = { totalBytes, totalFiles };
+    const mb = (totalBytes / (1024*1024)).toFixed(1);
+    const freeTierPct = Math.min(100, (totalBytes / (1024*1024*1024)) * 100).toFixed(2);
+    widget.innerHTML = `📷 <b>${totalFiles}</b> trip photo(s) stored across all entities · <b>${mb} MB</b> used (~${freeTierPct}% of a 1GB free-tier bucket). Check your Supabase dashboard → Storage for exact billing-plan limits.`;
+  } catch(e){
+    console.error(e);
+    widget.textContent = 'Could not load storage stats — check console.';
+  }
+}
+
+// ===== Full data backup (all entities, every table) =====
+$('exportFullBackup').addEventListener('click', async () => {
+  if(!isMaster()){ toast('Only Master Admin can export a full backup'); return; }
+  const btn = $('exportFullBackup');
+  btn.disabled = true; btn.textContent = 'Preparing backup…';
+  try{
+    const [
+      { data: allTrips, error: e1 },
+      { data: allClients, error: e2 },
+      { data: allSites, error: e3 },
+      { data: allBins, error: e4 },
+      { data: allLorries, error: e5 },
+      { data: allMaint, error: e6 },
+      { data: allStaff, error: e7 },
+      { data: allAudit, error: e8 }
+    ] = await Promise.all([
+      sb.from('trip_log').select('*').order('trip_date', {ascending:false}),
+      sb.from('logistics_clients').select('*').order('name'),
+      sb.from('logistics_sites').select('*').order('site_name'),
+      sb.from('bin_registry').select('*').order('bin_number'),
+      sb.from('lorry_registry').select('*').order('lorry_number'),
+      sb.from('bin_maintenance').select('*').order('sent_date', {ascending:false}),
+      sb.from('logistics_staff_view').select('*').order('created_at'),
+      sb.from('logistics_audit_logs').select('*').order('created_at', {ascending:false})
+    ]);
+    if(e1||e2||e3||e4||e5||e6||e7||e8){ console.error(e1,e2,e3,e4,e5,e6,e7,e8); toast('Backup failed — check console'); return; }
+
+    const clientMap = {}; (allClients||[]).forEach(c=>clientMap[c.id]=c.name);
+    const siteMap = {}; (allSites||[]).forEach(s=>siteMap[s.id]=s.site_name);
+    const entMap = {}; ENTITIES.forEach(e=>entMap[e.id]=e.name);
+    const eName = (id) => entMap[id] || '—';
+
+    const wb = XLSX.utils.book_new();
+
+    const tripsSheet = [['Entity','Date','Customer','Site','Lorry No.','Bin No.','Driver','Waste','Action','Notes','Logged By','Reviewed','Reviewed By','Photo URL','Created At']]
+      .concat((allTrips||[]).map(t=>[eName(t.entity_id), t.trip_date, clientMap[t.client_id]||'—', siteMap[t.site_id]||'—', t.lorry_number||'', t.bin_number, t.driver_name||'', t.waste_type, t.action, t.notes||'', t.logged_by||'', t.reviewed?'Yes':'No', t.reviewed_by||'', t.photo_url||'', t.created_at]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(tripsSheet), 'Trip Log');
+
+    const custSheet = [['Entity','Customer Name','Contact Name','Contact Phone','Created At']]
+      .concat((allClients||[]).map(c=>[eName(c.entity_id), c.name, c.contact_name||'', c.contact_phone||'', c.created_at]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(custSheet), 'Customers');
+
+    const sitesSheet = [['Entity','Customer','Branch Name','City','State','Created At']]
+      .concat((allSites||[]).map(s=>[eName(s.entity_id), clientMap[s.client_id]||'—', s.site_name, s.city||'', s.state||'', s.created_at]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sitesSheet), 'Branches');
+
+    const binsSheet = [['Entity','Bin No.','Waste Type','Size','Notes','Created At']]
+      .concat((allBins||[]).map(b=>[eName(b.entity_id), b.bin_number, b.waste_type||'', b.bin_size||'', b.notes||'', b.created_at]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(binsSheet), 'Bin Registry');
+
+    const lorriesSheet = [['Entity','Lorry No.','Default Driver','Notes','Created At']]
+      .concat((allLorries||[]).map(l=>[eName(l.entity_id), l.lorry_number, l.default_driver||'', l.notes||'', l.created_at]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(lorriesSheet), 'Lorry Registry');
+
+    const maintSheet = [['Entity','Bin No.','Workshop','Sent Date','Status','Returned Date','Notes','Logged By','Created At']]
+      .concat((allMaint||[]).map(m=>[eName(m.entity_id), m.bin_number, m.workshop_name, m.sent_date, m.status, m.returned_date||'', m.notes||'', m.logged_by||'', m.created_at]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(maintSheet), 'Maintenance');
+
+    const staffSheet = [['Entity','Name','Username','Role','Status','Created At']]
+      .concat((allStaff||[]).map(s=>[eName(s.entity_id), s.name, s.username, s.role, s.is_active?'Active':'Disabled', s.created_at]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(staffSheet), 'Staff');
+
+    const auditSheet = [['Entity','Time','Staff','Role','Action','Target','Details']]
+      .concat((allAudit||[]).map(a=>[eName(a.entity_id), a.created_at, a.actor_name||'', a.actor_role||'', a.action_type, a.target_name||'', a.details||'']));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(auditSheet), 'Audit Trail');
+
+    const fname = `jk-group-full-backup-${todayISO()}.xlsx`;
+    XLSX.writeFile(wb, fname);
+    await logAudit('export_full_backup', 'All entities', `Exported full data backup (${(allTrips||[]).length} trips, ${(allClients||[]).length} customers, ${(allAudit||[]).length} audit records)`);
+    toast('Full backup downloaded');
+  } catch(e){
+    console.error(e);
+    toast('Backup failed — check console');
+  } finally {
+    btn.disabled = false; btn.textContent = '⬇ Full Data Backup (Excel)';
+  }
+});
+
+
 ['audit-filt-date-from','audit-filt-date-to','audit-filt-staff','audit-filt-action','audit-filt-role'].forEach(id => $(id).addEventListener('change', renderAudit));
 $('audit-filt-search').addEventListener('input', renderAudit);
 $('auditClearFilters').addEventListener('click', () => {
@@ -1335,20 +1503,72 @@ $('saveNewStaff').addEventListener('click', async () => {
 // ===== Customers (full detail management, master admin + checker) =====
 let editingCustomerId = null;
 
+const CUSTOMER_LEAKAGE_THRESHOLD_DAYS = 7;
+let filterCustLeakage = 'all';
+let CUSTOMER_LEAKAGE_ACKS = [];
+
+document.querySelectorAll('[data-custfilter]').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('[data-custfilter]').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    filterCustLeakage = chip.dataset.custfilter;
+    renderCustomers();
+  });
+});
+
+async function loadCustomerLeakageAcks(){
+  if(!canSeeLeakage()) { CUSTOMER_LEAKAGE_ACKS = []; return; }
+  const { data, error } = await sb.from('customer_leakage_acks').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('created_at', {ascending:false});
+  if(error){ console.error(error); return; }
+  CUSTOMER_LEAKAGE_ACKS = data || [];
+}
+function lastCustomerAckFor(clientId){
+  return CUSTOMER_LEAKAGE_ACKS.find(a => a.client_id === clientId);
+}
+function customerLastOrder(clientId){
+  const trips = TRIPS.filter(t=>t.client_id===clientId);
+  if(trips.length===0) return null;
+  return trips.reduce((max,t) => t.trip_date > max ? t.trip_date : max, trips[0].trip_date);
+}
+
 function renderCustomers(){
+  $('custLeakageChip').style.display = canSeeLeakage() ? 'inline-block' : 'none';
   const body = $('customersBody');
-  const sorted = [...CLIENTS].sort((a,b) => a.name.localeCompare(b.name));
-  if(sorted.length===0){ body.innerHTML='<tr><td colspan="5"><div class="empty-state">No customers yet for this entity</div></td></tr>'; return; }
+  let sorted = [...CLIENTS].map(c => {
+    const lastOrder = customerLastOrder(c.id);
+    const daysInactive = lastOrder ? daysSince(lastOrder) : daysSince((c.created_at||'').slice(0,10));
+    const isInactive = daysInactive >= CUSTOMER_LEAKAGE_THRESHOLD_DAYS;
+    return { ...c, _lastOrder: lastOrder, _daysInactive: daysInactive, _isInactive: isInactive };
+  }).sort((a,b) => a.name.localeCompare(b.name));
+
+  if(filterCustLeakage==='inactive') sorted = sorted.filter(c=>c._isInactive);
+
+  if(sorted.length===0){ body.innerHTML='<tr><td colspan="6"><div class="empty-state">No customers match this view</div></td></tr>'; return; }
   body.innerHTML = sorted.map(c => {
     const sites = SITES.filter(s=>s.client_id===c.id);
     const sitesLabel = sites.length ? sites.map(s=>s.site_name).join(', ') : '<span style="color:var(--text-dim);">No branches yet</span>';
+    const ack = lastCustomerAckFor(c.id);
+    let lastOrderCell;
+    if(c._lastOrder){
+      lastOrderCell = c._isInactive
+        ? `<span style="color:var(--red); font-weight:600;">⚠ ${c._daysInactive}d ago</span>`
+        : `${fmtDate(c._lastOrder)}`;
+    } else {
+      lastOrderCell = c._isInactive
+        ? `<span style="color:var(--red); font-weight:600;">⚠ No orders (added ${c._daysInactive}d ago)</span>`
+        : `<span style="color:var(--text-dim);">No orders yet</span>`;
+    }
+    if(ack) lastOrderCell += `<div style="font-size:10px; color:var(--text-dim); margin-top:3px;">Last checked: ${ack.acknowledged_by} (${fmtDate(ack.created_at.slice(0,10))})</div>`;
+    const ackBtn = (c._isInactive && canSeeLeakage()) ? `<button class="row-btn" data-ack-cust="${c.id}" data-days="${c._daysInactive}">Acknowledge</button>` : '';
     return `
     <tr>
       <td>${c.name}</td>
       <td>${c.contact_name || '—'}</td>
       <td>${c.contact_phone || '—'}</td>
       <td>${sitesLabel}</td>
+      <td>${lastOrderCell}${ackBtn}</td>
       <td>
+        <button class="row-btn" data-id="${c.id}" data-trace="1">Trace</button>
         <button class="row-btn edit" data-id="${c.id}">Edit</button>
         <button class="row-btn" data-id="${c.id}" data-sites="1">Branches</button>
         <button class="row-btn del" data-id="${c.id}" data-name="${c.name}">Delete</button>
@@ -1360,6 +1580,25 @@ function renderCustomers(){
   });
   body.querySelectorAll('[data-sites]').forEach(btn => {
     btn.addEventListener('click', () => openCustomerSitesModal(btn.dataset.id));
+  });
+  body.querySelectorAll('[data-trace]').forEach(btn => {
+    btn.addEventListener('click', () => openCustomerTraceModal(btn.dataset.id));
+  });
+  body.querySelectorAll('[data-ack-cust]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const clientId = btn.dataset.ackCust;
+      const cust = CLIENTS.find(x=>x.id===clientId);
+      const note = prompt(`Optional note about ${cust?cust.name:'this customer'} (e.g. "Called — still active, next order due Friday", "Confirmed lost to competitor")`) || null;
+      const { error } = await sb.from('customer_leakage_acks').insert({
+        entity_id: ACTIVE_ENTITY_ID, client_id: clientId, days_at_time: parseInt(btn.dataset.days,10),
+        acknowledged_by: CURRENT_USER.name, acknowledged_by_role: CURRENT_USER.role, note
+      });
+      if(error){ console.error(error); toast('Failed to record'); return; }
+      await logAudit('acknowledge_customer_inactivity', cust?cust.name:clientId, `Checked in on ${btn.dataset.days}-day inactive customer${note?': '+note:''}`);
+      toast('Follow-up recorded');
+      await loadCustomerLeakageAcks();
+      renderCustomers();
+    });
   });
   body.querySelectorAll('.row-btn.del').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -1726,6 +1965,160 @@ $('saveBinRegistry').addEventListener('click', async () => {
   $('binRegistryOverlay').classList.remove('show');
   await loadBinRegistry(); renderBinRegistry();
 });
+
+// ===== Lorry Registry (master list) =====
+let editingLorryRegistryId = null;
+
+async function loadLorryRegistry(){
+  const { data, error } = await sb.from('lorry_registry').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('lorry_number');
+  if(error){ console.error(error); return; }
+  LORRY_REGISTRY = data || [];
+}
+function renderLorryRegistry(){
+  const body = $('lorryRegistryBody');
+  if(LORRY_REGISTRY.length===0){ body.innerHTML='<tr><td colspan="4"><div class="empty-state">No lorries registered yet</div></td></tr>'; return; }
+  body.innerHTML = LORRY_REGISTRY.map(l => `
+    <tr>
+      <td>${l.lorry_number}</td>
+      <td>${l.default_driver || '—'}</td>
+      <td>${l.notes || '—'}</td>
+      <td>${canEdit() ? `<button class="row-btn edit" data-id="${l.id}">Edit</button>` : ''}${canDelete() ? `<button class="row-btn del" data-id="${l.id}">Delete</button>` : ''}</td>
+    </tr>`).join('');
+  body.querySelectorAll('.row-btn.edit').forEach(btn => btn.addEventListener('click', () => openLorryRegistryModal(btn.dataset.id)));
+  body.querySelectorAll('.row-btn.del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const rec = LORRY_REGISTRY.find(x=>x.id===btn.dataset.id);
+      if(!confirm(`Remove lorry ${rec.lorry_number} from the registry?`)) return;
+      const { error } = await sb.from('lorry_registry').delete().eq('id', btn.dataset.id);
+      if(error){ console.error(error); toast('Failed to delete'); return; }
+      await logAudit('delete_lorry_registry', rec.lorry_number, 'Removed lorry from registry');
+      toast('Lorry removed');
+      await loadLorryRegistry(); renderLorryRegistry();
+    });
+  });
+}
+function openLorryRegistryModal(id){
+  const l = id ? LORRY_REGISTRY.find(x=>x.id===id) : null;
+  editingLorryRegistryId = id || null;
+  $('lorryRegistryModalTitle').textContent = l ? 'Edit lorry' : 'Register lorry';
+  $('lr-number').value = l ? l.lorry_number : '';
+  $('lr-driver').value = l ? (l.default_driver||'') : '';
+  $('lr-notes').value = l ? (l.notes||'') : '';
+  $('saveLorryRegistry').textContent = l ? 'Save changes' : 'Register lorry';
+  $('lorryRegistryOverlay').classList.add('show');
+}
+$('openNewLorry').addEventListener('click', () => openLorryRegistryModal(null));
+$('closeLorryRegistry').addEventListener('click', () => $('lorryRegistryOverlay').classList.remove('show'));
+$('cancelLorryRegistry').addEventListener('click', () => $('lorryRegistryOverlay').classList.remove('show'));
+$('saveLorryRegistry').addEventListener('click', async () => {
+  const lorryNumber = $('lr-number').value.trim();
+  if(!lorryNumber){ toast('Enter the lorry number'); return; }
+  const dupe = LORRY_REGISTRY.find(l => l.lorry_number.toLowerCase()===lorryNumber.toLowerCase() && l.id !== editingLorryRegistryId);
+  if(dupe){ toast(`Lorry ${lorryNumber} is already registered`); return; }
+  const payload = { lorry_number: lorryNumber, default_driver: $('lr-driver').value||null, notes: $('lr-notes').value||null };
+  if(editingLorryRegistryId){
+    const { error } = await sb.from('lorry_registry').update(payload).eq('id', editingLorryRegistryId);
+    if(error){ console.error(error); toast('Failed to update lorry'); return; }
+    await logAudit('edit_lorry_registry', lorryNumber, 'Updated lorry registry entry');
+    toast('Lorry updated');
+  } else {
+    const { error } = await sb.from('lorry_registry').insert({ ...payload, entity_id: ACTIVE_ENTITY_ID });
+    if(error){ console.error(error); toast('Failed to register lorry'); return; }
+    await logAudit('register_lorry', lorryNumber, 'Added lorry to registry');
+    toast('Lorry registered');
+  }
+  $('lorryRegistryOverlay').classList.remove('show');
+  await loadLorryRegistry(); renderLorryRegistry();
+});
+
+// ===== Customer Trace =====
+function openCustomerTraceModal(customerId){
+  const c = CLIENTS.find(x=>x.id===customerId);
+  if(!c) return;
+  $('customerTraceTitle').textContent = `Trace — ${c.name}`;
+  const sites = SITES.filter(s=>s.client_id===customerId);
+  const trips = TRIPS.filter(t=>t.client_id===customerId).sort((a,b)=>b.trip_date.localeCompare(a.trip_date));
+
+  const byBin = {};
+  trips.forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
+  const currentBins = Object.values(byBin).filter(b=>b.action==='deploy');
+
+  const branchesHtml = sites.length
+    ? sites.map(s=>`<span class="pill role-checker">${s.site_name}${s.city?' — '+s.city:''}</span>`).join(' ')
+    : '<span style="color:var(--text-dim);">No branches on file</span>';
+
+  const currentBinsHtml = currentBins.length
+    ? currentBins.map(b=>`<div style="padding:6px 0; border-bottom:1px solid var(--border); font-size:12.5px;"><b>${b.bin_number}</b> · ${b.waste_type} · at ${siteName(b.site_id)} · ${daysSince(b.trip_date)} day(s) out</div>`).join('')
+    : '<div class="empty-state" style="padding:14px;">No bins currently out at this customer</div>';
+
+  const tripsHtml = trips.length
+    ? `<div class="table-wrap" style="max-height:260px; overflow-y:auto;"><table>
+        <thead><tr><th>Date</th><th>Site</th><th>Bin</th><th>Action</th><th>Driver</th></tr></thead>
+        <tbody>${trips.slice(0,50).map(t=>`<tr><td>${fmtDate(t.trip_date)}</td><td>${siteName(t.site_id)}</td><td>${t.bin_number}</td><td><span class="pill ${t.action}">${t.action==='deploy'?'Bin Out':'Bin In'}</span></td><td>${t.driver_name||'—'}</td></tr>`).join('')}</tbody>
+      </table></div>${trips.length>50?`<div style="font-size:11px;color:var(--text-dim);margin-top:6px;">Showing most recent 50 of ${trips.length} trips</div>`:''}`
+    : '<div class="empty-state" style="padding:14px;">No trip history yet</div>';
+
+  $('customerTraceBody').innerHTML = `
+    <div style="margin-bottom:14px; font-size:12.5px; color:var(--text-dim);">
+      Contact: ${c.contact_name||'—'} ${c.contact_phone?'· '+c.contact_phone:''}
+    </div>
+    <h3 style="font-size:13px; margin-bottom:8px;">Branches</h3>
+    <div style="margin-bottom:18px;">${branchesHtml}</div>
+    <h3 style="font-size:13px; margin-bottom:8px;">Currently out (${currentBins.length})</h3>
+    <div style="margin-bottom:18px;">${currentBinsHtml}</div>
+    <h3 style="font-size:13px; margin-bottom:8px;">Trip history (${trips.length})</h3>
+    ${tripsHtml}
+  `;
+  $('customerTraceOverlay').classList.add('show');
+}
+$('closeCustomerTrace').addEventListener('click', () => $('customerTraceOverlay').classList.remove('show'));
+$('closeCustomerTrace2').addEventListener('click', () => $('customerTraceOverlay').classList.remove('show'));
+
+// ===== Alerts widget =====
+const ALERTS_DISMISS_KEY = 'rr_alerts_dismissed_date';
+function alertsDismissedToday(){
+  return localStorage.getItem(ALERTS_DISMISS_KEY) === todayISO();
+}
+function renderAlertsWidget(){
+  const wrap = $('alertsWidget');
+  if(alertsDismissedToday() || isMaker()){ wrap.style.display='none'; return; }
+
+  const byBin = {};
+  TRIPS.forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
+  const leakingCount = Object.values(byBin).filter(b=>b.action==='deploy' && daysSince(b.trip_date)>=LEAKAGE_THRESHOLD_DAYS).length;
+  const overdueRepairs = MAINTENANCE.filter(m=>m.status==='in_repair' && daysSince(m.sent_date)>=14).length;
+  const unreviewedCount = TRIPS.filter(t=>!t.reviewed).length;
+  const inactiveCustCount = CLIENTS.filter(c => {
+    const lastOrder = customerLastOrder(c.id);
+    const days = lastOrder ? daysSince(lastOrder) : daysSince((c.created_at||'').slice(0,10));
+    return days >= CUSTOMER_LEAKAGE_THRESHOLD_DAYS;
+  }).length;
+
+  if(leakingCount===0 && overdueRepairs===0 && unreviewedCount===0 && inactiveCustCount===0){
+    wrap.innerHTML = `<div class="alerts-widget"><div class="alert-card ok"><div class="an">✓</div><div class="al">No leakage, overdue repairs, inactive customers, or unreviewed trips</div></div></div>`;
+    wrap.style.display='block';
+    return;
+  }
+  wrap.innerHTML = `<div class="alerts-widget">
+    <div class="alert-card ${leakingCount===0?'ok':''}" id="alertLeaking"><div class="an">${leakingCount}</div><div class="al">Bins leaking (7+ days out)</div></div>
+    <div class="alert-card ${overdueRepairs===0?'ok':''}" id="alertRepairs"><div class="an">${overdueRepairs}</div><div class="al">Repairs overdue (14+ days)</div></div>
+    <div class="alert-card ${inactiveCustCount===0?'ok':''}" id="alertInactiveCust"><div class="an">${inactiveCustCount}</div><div class="al">Customers with no orders (7+ days)</div></div>
+    <div class="alert-card ${unreviewedCount===0?'ok':''}" id="alertUnreviewed"><div class="an">${unreviewedCount}</div><div class="al">Trips not yet reviewed</div></div>
+    <span class="alerts-dismiss" id="alertsDismiss">Dismiss for today</span>
+  </div>`;
+  wrap.style.display='block';
+  $('alertLeaking').addEventListener('click', () => {
+    document.querySelector('.tab[data-view="bins"]').click();
+    setTimeout(() => document.querySelector('[data-binstatus="leakage"]')?.click(), 50);
+  });
+  $('alertRepairs').addEventListener('click', () => document.querySelector('.tab[data-view="maintenance"]').click());
+  $('alertInactiveCust').addEventListener('click', () => {
+    document.querySelector('.tab[data-view="customers"]').click();
+    setTimeout(() => document.querySelector('[data-custfilter="inactive"]')?.click(), 50);
+  });
+  $('alertUnreviewed').addEventListener('click', () => document.querySelector('.tab[data-view="log"]').click());
+  $('alertsDismiss').addEventListener('click', (e) => { e.stopPropagation(); localStorage.setItem(ALERTS_DISMISS_KEY, todayISO()); wrap.style.display='none'; });
+}
 
 // ===== Bin Maintenance =====
 async function loadMaintenance(){
@@ -2283,6 +2676,16 @@ function updateBinStatusHint(){
 }
 $('f-bin').addEventListener('input', updateBinStatusHint);
 
+$('f-lorry').addEventListener('blur', () => {
+  const val = $('f-lorry').value.trim();
+  if(!val) return;
+  const match = LORRY_REGISTRY.find(l => l.lorry_number.toLowerCase() === val.toLowerCase());
+  if(match && match.default_driver && !$('f-driver').value.trim()){
+    $('f-driver').value = match.default_driver;
+    toast(`Driver auto-filled from lorry registry: ${match.default_driver}`);
+  }
+});
+
 $('saveTrip').addEventListener('click', async () => {
   if(!newActionSelection){ toast('Select deploy or collect'); return; }
   if(!$('f-date').value){ toast('Select a trip date'); return; }
@@ -2365,7 +2768,7 @@ $('saveTrip').addEventListener('click', async () => {
   await loadAll();
 });
 
-[$('tripOverlay'), $('newStaffOverlay'), $('customerOverlay'), $('customerSitesOverlay'), $('maintenanceOverlay'), $('binRegistryOverlay'), $('importExcelOverlay')].forEach(ov => ov.addEventListener('click', (e) => { if(e.target===ov) ov.classList.remove('show'); }));
+[$('tripOverlay'), $('newStaffOverlay'), $('customerOverlay'), $('customerSitesOverlay'), $('customerTraceOverlay'), $('maintenanceOverlay'), $('binRegistryOverlay'), $('lorryRegistryOverlay'), $('importExcelOverlay')].forEach(ov => ov.addEventListener('click', (e) => { if(e.target===ov) ov.classList.remove('show'); }));
 </script>
 </body>
 </html>
