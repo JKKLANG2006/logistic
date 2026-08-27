@@ -219,6 +219,14 @@
       <div><div class="title">JK Group of Companies</div><div class="sub">Logistic Portal</div></div>
     </div>
     <div class="entity-switcher" id="entitySwitcherWrap"></div>
+    <div id="liveIndicator" style="display:none; align-items:center; gap:6px; font-size:11px; color:var(--text-dim);">
+      <span id="liveDot" style="width:7px; height:7px; border-radius:50%; background:var(--metal); display:inline-block;"></span>
+      <span id="liveText">Connecting…</span>
+    </div>
+    <div id="presenceWrap" style="position:relative; display:none;">
+      <span class="entity-static" id="presenceBadge" style="cursor:pointer;">👥 0 online</span>
+      <div id="presenceDropdown" class="combo-dropdown" style="display:none; min-width:180px;"></div>
+    </div>
     <div class="headright">
       <div class="userchip"><b id="whoName"></b><br><span id="whoRole"></span></div>
       <button class="btn-ghost" id="logoutBtn">Log out</button>
@@ -279,6 +287,7 @@
       <span class="clear" id="bulkClearSelection">Clear selection</span>
     </div>
     <div id="loading" class="loading">Loading trip log…</div>
+    <div id="tripCountSummary" style="display:none; font-size:12.5px; color:var(--text-dim); margin-bottom:10px;"></div>
     <div class="table-wrap" id="tableWrap" style="display:none;">
       <table>
         <thead><tr>
@@ -454,7 +463,10 @@
     <div id="f-newsite-wrap" style="display:none;">
       <div class="field"><label>New site name</label><input type="text" id="f-newsite-name" placeholder="e.g. Warehouse 3"></div>
     </div>
-    <div class="field"><label>Lorry number</label><input type="text" id="f-lorry" placeholder="e.g. WXY 1234"></div>
+    <div class="field" style="position:relative;"><label>Lorry number</label>
+      <input type="text" id="f-lorry" placeholder="e.g. WXY 1234" autocomplete="off">
+      <div id="f-lorry-dropdown" class="combo-dropdown" style="display:none;"></div>
+    </div>
     <div class="field"><label>Bin number</label><input type="text" id="f-bin" placeholder="e.g. RR-014">
       <div id="binStatusHint" style="font-size:11px; margin-top:6px; display:none;"></div>
     </div>
@@ -738,7 +750,7 @@ function renderEntitySwitcher(){
   const wrap = $('entitySwitcherWrap');
   if(isMaster()){
     wrap.innerHTML = `<select id="entitySelect">${ENTITIES.map(e=>`<option value="${e.id}" ${e.id===ACTIVE_ENTITY_ID?'selected':''}>${e.name}</option>`).join('')}</select>`;
-    $('entitySelect').addEventListener('change', async (e) => { ACTIVE_ENTITY_ID = e.target.value; await loadAll(); });
+    $('entitySelect').addEventListener('change', async (e) => { ACTIVE_ENTITY_ID = e.target.value; await loadAll(); subscribeRealtime(); });
   } else {
     wrap.innerHTML = `<div class="entity-static">${entityName(ACTIVE_ENTITY_ID)}</div>`;
   }
@@ -771,7 +783,93 @@ function enterApp(){
   renderEntitySwitcher();
   loadAll();
   startSessionTimeout();
+  subscribeRealtime();
 }
+
+// ===== Live dashboard sync (Supabase Realtime) =====
+let realtimeChannel = null;
+let realtimeReloadTimer = null;
+function debouncedRealtimeReload(){
+  if(realtimeReloadTimer) clearTimeout(realtimeReloadTimer);
+  realtimeReloadTimer = setTimeout(() => { loadAll(); }, 600);
+}
+function setLiveStatus(status){
+  const dot = $('liveDot'), text = $('liveText');
+  $('liveIndicator').style.display = 'flex';
+  if(status === 'connected'){ dot.style.background = 'var(--sage)'; text.textContent = 'Live'; }
+  else if(status === 'connecting'){ dot.style.background = 'var(--amber)'; text.textContent = 'Connecting…'; }
+  else { dot.style.background = 'var(--red)'; text.textContent = 'Offline'; }
+}
+function subscribeRealtime(){
+  if(realtimeChannel){ sb.removeChannel(realtimeChannel); realtimeChannel = null; }
+  if(!ACTIVE_ENTITY_ID) return;
+  setLiveStatus('connecting');
+  const filter = `entity_id=eq.${ACTIVE_ENTITY_ID}`;
+  realtimeChannel = sb.channel('entity-sync-' + ACTIVE_ENTITY_ID)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'trip_log', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'logistics_clients', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'logistics_sites', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'bin_maintenance', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'bin_registry', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'lorry_registry', filter }, debouncedRealtimeReload)
+    .on('presence', { event: 'sync' }, renderPresence)
+    .on('presence', { event: 'join' }, renderPresence)
+    .on('presence', { event: 'leave' }, renderPresence)
+    .subscribe(async (status) => {
+      if(status === 'SUBSCRIBED'){
+        setLiveStatus('connected');
+        if(!isMaster() && CURRENT_USER){
+          await realtimeChannel.track({ name: CURRENT_USER.name, role: CURRENT_USER.role });
+        }
+        renderPresence();
+      }
+      else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') setLiveStatus('offline');
+    });
+}
+function visibleRolesFor(role){
+  if(role === 'admin') return ['checker','maker','reviewer'];
+  if(role === 'reviewer') return ['checker','maker'];
+  if(role === 'checker') return ['maker'];
+  return []; // maker sees no one
+}
+function renderPresence(){
+  if(!realtimeChannel || !CURRENT_USER) return;
+  const allowed = visibleRolesFor(CURRENT_USER.role);
+  const wrap = $('presenceWrap');
+  if(allowed.length === 0){ wrap.style.display = 'none'; return; }
+
+  const state = realtimeChannel.presenceState();
+  const people = [];
+  Object.values(state).forEach(metas => {
+    metas.forEach(m => { if(m.role && m.role !== 'admin' && allowed.includes(m.role)) people.push(m); });
+  });
+  // De-duplicate by name+role (same person, multiple tabs)
+  const seen = new Set();
+  const unique = people.filter(p => {
+    const key = p.name + '|' + p.role;
+    if(seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+
+  wrap.style.display = 'block';
+  $('presenceBadge').textContent = `👥 ${unique.length} online`;
+  const dd = $('presenceDropdown');
+  dd.innerHTML = unique.length
+    ? unique.map(p => `<div class="combo-item" style="cursor:default;"><span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--sage); margin-right:7px;"></span>${p.name} <span class="pill role-${p.role}" style="margin-left:4px;">${p.role}</span></div>`).join('')
+    : `<div class="combo-empty">No staff currently online</div>`;
+}
+$('presenceBadge').addEventListener('click', () => {
+  const dd = $('presenceDropdown');
+  dd.style.display = dd.style.display === 'block' ? 'none' : 'block';
+});
+document.addEventListener('click', (e) => {
+  if(!e.target.closest('#presenceWrap')){ $('presenceDropdown').style.display = 'none'; }
+});
+function unsubscribeRealtime(){
+  if(realtimeChannel){ sb.removeChannel(realtimeChannel); realtimeChannel = null; }
+  if(realtimeReloadTimer) clearTimeout(realtimeReloadTimer);
+}
+
 
 // ===== Session timeout (10 minutes of inactivity) =====
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -794,6 +892,7 @@ async function doLogout(reason){
     await logAudit('logout', CURRENT_USER.name, reason || 'Logged out');
     if(CURRENT_USER.authType === 'master'){ await sb.auth.signOut(); }
   }
+  unsubscribeRealtime();
   localStorage.removeItem('rr_staff_session');
   CURRENT_USER = null;
   if(sessionTimeoutHandle) clearTimeout(sessionTimeoutHandle);
@@ -944,6 +1043,14 @@ function renderLog(){
   const body = $('logBody');
   const showBulk = canReviewToggle();
   $('selectAllTh').style.display = showBulk ? 'table-cell' : 'none';
+
+  const todayCount = TRIPS.filter(t => t.trip_date === todayISO()).length;
+  const summary = $('tripCountSummary');
+  summary.style.display = 'block';
+  const filtersActive = $('filt-date-from').value || $('filt-date-to').value || $('filt-driver').value || $('filt-client').value || $('filt-site').value || $('filt-lorry').value || $('filt-bin').value || $('filt-search').value || filterAction !== 'all';
+  summary.innerHTML = filtersActive
+    ? `<b>${rows.length}</b> trip(s) shown with current filters · <b>${todayCount}</b> trip(s) logged today`
+    : `<b>${rows.length}</b> trip(s) total · <b>${todayCount}</b> trip(s) logged today`;
 
   if(rows.length === 0){ body.innerHTML = `<tr><td colspan="12"><div class="empty-state">No trips match these filters</div></td></tr>`; updateBulkBar(); return; }
   body.innerHTML = rows.map(t => {
@@ -2676,13 +2783,37 @@ function updateBinStatusHint(){
 }
 $('f-bin').addEventListener('input', updateBinStatusHint);
 
-$('f-lorry').addEventListener('blur', () => {
-  const val = $('f-lorry').value.trim();
-  if(!val) return;
-  const match = LORRY_REGISTRY.find(l => l.lorry_number.toLowerCase() === val.toLowerCase());
+function fillDriverFromLorry(lorryNumber){
+  const match = LORRY_REGISTRY.find(l => l.lorry_number.toLowerCase() === lorryNumber.toLowerCase());
   if(match && match.default_driver && !$('f-driver').value.trim()){
     $('f-driver').value = match.default_driver;
     toast(`Driver auto-filled from lorry registry: ${match.default_driver}`);
+  }
+}
+function renderLorryDropdown(rawText){
+  const dd = $('f-lorry-dropdown');
+  const q = (rawText||'').trim().toLowerCase();
+  const matches = (q ? LORRY_REGISTRY.filter(l=>l.lorry_number.toLowerCase().includes(q)) : LORRY_REGISTRY).slice(0, 30);
+  if(matches.length===0){ dd.style.display='none'; return; }
+  dd.innerHTML = matches.map(l => `<div class="combo-item" data-lorry="${l.lorry_number.replace(/"/g,'&quot;')}">${l.lorry_number}${l.default_driver?` <span style="color:var(--text-dim); font-size:11px;">— ${l.default_driver}</span>`:''}</div>`).join('');
+  dd.style.display = 'block';
+  dd.querySelectorAll('.combo-item').forEach(item => {
+    item.addEventListener('click', () => {
+      $('f-lorry').value = item.dataset.lorry;
+      dd.style.display = 'none';
+      fillDriverFromLorry(item.dataset.lorry);
+    });
+  });
+}
+$('f-lorry').addEventListener('input', () => renderLorryDropdown($('f-lorry').value));
+$('f-lorry').addEventListener('focus', () => renderLorryDropdown($('f-lorry').value));
+$('f-lorry').addEventListener('blur', () => {
+  const val = $('f-lorry').value.trim();
+  if(val) fillDriverFromLorry(val);
+});
+document.addEventListener('click', (e) => {
+  if(!e.target.closest('#f-lorry') && !e.target.closest('#f-lorry-dropdown')){
+    $('f-lorry-dropdown').style.display = 'none';
   }
 });
 
