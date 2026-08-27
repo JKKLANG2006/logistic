@@ -10,6 +10,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
   :root{
     --bg: #F3F1EC; --panel: #FFFFFF; --panel-2: #F5F2EC; --border: #E1DBCF;
@@ -67,6 +68,7 @@
   .tab[data-view="maintenance"]::before{ background: var(--violet); }
   .tab[data-view="binregistry"]::before{ background: var(--carton); }
   .tab[data-view="lorryregistry"]::before{ background: var(--metal); }
+  .tab[data-view="insights"]::before{ display:none; }
   .tab[data-view="customers"]::before{ background: var(--teal); }
   .tab[data-view="audit"]::before{ background: var(--red); }
   .tab[data-view="staff"]::before{ background: var(--pink); }
@@ -176,6 +178,9 @@
   .toast{ position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background: var(--panel-2); border:1px solid var(--border); color:var(--text); padding: 11px 18px; border-radius:9px; font-size:12.5px; z-index:60; opacity:0; pointer-events:none; transition: opacity .2s ease, transform .2s ease; }
   .toast.show{ opacity:1; transform: translateX(-50%) translateY(-4px); }
   .loading{ text-align:center; padding:60px 0; color:var(--text-dim); font-size:13px; }
+  @media (max-width: 780px){
+    #view-insights > div[style*="grid-template-columns"]{ grid-template-columns: 1fr !important; }
+  }
 
   .cp-turn{ margin-bottom:20px; }
   .cp-q{ display:inline-block; background: var(--panel-2); border:1px solid var(--border); border-radius:14px 14px 4px 14px; padding:10px 14px; font-size:13px; margin-left:auto; max-width:80%; float:right; clear:both; }
@@ -238,6 +243,7 @@
     <div class="tab" data-view="maintenance">Maintenance</div>
     <div class="tab" data-view="binregistry">Bins</div>
     <div class="tab" data-view="lorryregistry">Lorries</div>
+    <div class="tab" data-view="insights" id="insightsTab" style="display:none;">📊 Insights</div>
     <div class="tab" data-view="customers" id="customersTab" style="display:none;">Customers</div>
     <div class="tab" data-view="audit" id="auditTab" style="display:none;">Audit Trail</div>
     <div class="tab" data-view="staff" id="staffTab" style="display:none;">Staff</div>
@@ -351,6 +357,36 @@
         <thead><tr><th>Lorry No.</th><th>Default driver</th><th>Notes</th><th></th></tr></thead>
         <tbody id="lorryRegistryBody"></tbody>
       </table>
+    </div>
+  </div>
+
+  <div class="view" id="view-insights">
+    <div class="section-head">
+      <h2>📊 Insights</h2>
+    </div>
+    <div class="filters">
+      <span class="fchip" data-insight-period="7">Last 7 days</span>
+      <span class="fchip active" data-insight-period="30">Last 30 days</span>
+      <span class="fchip" data-insight-period="90">Last 90 days</span>
+      <span class="fchip" data-insight-period="all">All time</span>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+      <div class="table-wrap" style="padding:16px; grid-column:1 / -1;">
+        <h3 style="font-size:13px; margin-bottom:10px;">Trip volume over time</h3>
+        <canvas id="chartVolume" height="80"></canvas>
+      </div>
+      <div class="table-wrap" style="padding:16px;">
+        <h3 style="font-size:13px; margin-bottom:10px;">Waste type mix</h3>
+        <canvas id="chartWaste" height="180"></canvas>
+      </div>
+      <div class="table-wrap" style="padding:16px;">
+        <h3 style="font-size:13px; margin-bottom:10px;">Top customers by volume</h3>
+        <canvas id="chartCustomers" height="180"></canvas>
+      </div>
+      <div class="table-wrap" style="padding:16px; grid-column:1 / -1;">
+        <h3 style="font-size:13px; margin-bottom:10px;">Driver leaderboard</h3>
+        <canvas id="chartDrivers" height="120"></canvas>
+      </div>
     </div>
   </div>
 
@@ -774,6 +810,7 @@ function enterApp(){
   $('copilotTab').style.display = isMaster() ? 'block' : 'none';
   $('auditTab').style.display = canSeeAudit() ? 'block' : 'none';
   $('customersTab').style.display = canEdit() ? 'block' : 'none';
+  $('insightsTab').style.display = isMaker() ? 'none' : 'block';
   $('openNewBin').style.display = (canEdit() || isMaker()) ? 'inline-block' : 'none';
   $('openNewLorry').style.display = (canEdit() || isMaker()) ? 'inline-block' : 'none';
   $('openNew').style.display = canCreate() ? 'inline-block' : 'none';
@@ -941,6 +978,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if(tab.dataset.view === 'customers') { await loadCustomerLeakageAcks(); renderCustomers(); }
     if(tab.dataset.view === 'binregistry') { await loadBinRegistry(); renderBinRegistry(); }
     if(tab.dataset.view === 'lorryregistry') { renderLorryRegistry(); }
+    if(tab.dataset.view === 'insights') { renderInsights(); }
   });
 });
 
@@ -969,6 +1007,7 @@ async function loadAll(){
   if($('view-customers').classList.contains('active')) { await loadCustomerLeakageAcks(); renderCustomers(); }
   if($('view-binregistry').classList.contains('active')) { await loadBinRegistry(); renderBinRegistry(); }
   if($('view-lorryregistry').classList.contains('active')) renderLorryRegistry();
+  if($('view-insights').classList.contains('active')) renderInsights();
   if($('view-maintenance').classList.contains('active')) { await loadMaintenance(); renderMaintenance(); }
 }
 
@@ -2137,6 +2176,83 @@ $('saveLorryRegistry').addEventListener('click', async () => {
   $('lorryRegistryOverlay').classList.remove('show');
   await loadLorryRegistry(); renderLorryRegistry();
 });
+
+// ===== Insights dashboard =====
+let insightPeriod = '30';
+let chartVolume=null, chartWaste=null, chartCustomers=null, chartDrivers=null;
+const CHART_COLORS = { carton:'#A8763F', plastic:'#2E6DB4', metal:'#7A8087', general:'#6E6355', bar:'#4C9A6A', bar2:'#2E6DB4' };
+
+document.querySelectorAll('[data-insight-period]').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('[data-insight-period]').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    insightPeriod = chip.dataset.insightPeriod;
+    renderInsights();
+  });
+});
+
+function insightsFilteredTrips(){
+  if(insightPeriod === 'all') return TRIPS;
+  const days = parseInt(insightPeriod, 10);
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().slice(0,10);
+  return TRIPS.filter(t => t.trip_date >= cutoffStr);
+}
+
+function renderInsights(){
+  if(typeof Chart === 'undefined') return;
+  const rows = insightsFilteredTrips();
+
+  // --- Trip volume over time (daily counts) ---
+  const dayCounts = {};
+  rows.forEach(t => { dayCounts[t.trip_date] = (dayCounts[t.trip_date]||0) + 1; });
+  const sortedDays = Object.keys(dayCounts).sort();
+  const volLabels = sortedDays.map(d => fmtDate(d));
+  const volData = sortedDays.map(d => dayCounts[d]);
+
+  if(chartVolume) chartVolume.destroy();
+  chartVolume = new Chart($('chartVolume'), {
+    type: 'line',
+    data: { labels: volLabels, datasets: [{ label:'Trips', data: volData, borderColor: CHART_COLORS.bar, backgroundColor: 'rgba(76,154,106,0.12)', fill:true, tension:0.25, pointRadius:2 }] },
+    options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
+  });
+
+  // --- Waste type mix ---
+  const wasteCounts = { carton:0, plastic:0, metal:0, general:0 };
+  rows.forEach(t => { if(wasteCounts[t.waste_type]!==undefined) wasteCounts[t.waste_type]++; });
+  if(chartWaste) chartWaste.destroy();
+  chartWaste = new Chart($('chartWaste'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Carton','Plastic','Metal','Rubbish'],
+      datasets: [{ data:[wasteCounts.carton, wasteCounts.plastic, wasteCounts.metal, wasteCounts.general],
+        backgroundColor:[CHART_COLORS.carton, CHART_COLORS.plastic, CHART_COLORS.metal, CHART_COLORS.general] }]
+    },
+    options: { responsive:true, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:10, font:{size:11} } } } }
+  });
+
+  // --- Top customers by volume ---
+  const custCounts = {};
+  rows.forEach(t => { custCounts[t.client_id] = (custCounts[t.client_id]||0) + 1; });
+  const topCust = Object.entries(custCounts).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  if(chartCustomers) chartCustomers.destroy();
+  chartCustomers = new Chart($('chartCustomers'), {
+    type: 'bar',
+    data: { labels: topCust.map(([id])=>clientName(id)), datasets:[{ label:'Trips', data: topCust.map(([,c])=>c), backgroundColor: CHART_COLORS.bar }] },
+    options: { indexAxis:'y', responsive:true, plugins:{ legend:{ display:false } }, scales:{ x:{ beginAtZero:true, ticks:{ precision:0 } } } }
+  });
+
+  // --- Driver leaderboard ---
+  const driverCounts = {};
+  rows.forEach(t => { const d = t.driver_name || 'Unassigned'; driverCounts[d] = (driverCounts[d]||0) + 1; });
+  const topDrivers = Object.entries(driverCounts).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  if(chartDrivers) chartDrivers.destroy();
+  chartDrivers = new Chart($('chartDrivers'), {
+    type: 'bar',
+    data: { labels: topDrivers.map(([n])=>n), datasets:[{ label:'Trips', data: topDrivers.map(([,c])=>c), backgroundColor: CHART_COLORS.bar2 }] },
+    options: { responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } } } }
+  });
+}
 
 // ===== Customer Trace =====
 function openCustomerTraceModal(customerId){
