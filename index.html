@@ -999,6 +999,10 @@ function enterApp(){
   $('openImportExcel').style.display = canCreate() ? 'inline-block' : 'none';
   $('leakageChip').style.display = canSeeLeakage() ? 'inline-block' : 'none';
   renderEntitySwitcher();
+  if(isMaker() || isChecker()){
+    const ordersTab = document.querySelector('.tab[data-view="orders"]');
+    if(ordersTab) ordersTab.click();
+  }
   loadAll();
   startSessionTimeout();
   subscribeRealtime();
