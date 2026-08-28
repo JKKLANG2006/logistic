@@ -775,6 +775,7 @@
     <div class="field" id="ao-bin-field"><label id="ao-bin-label">Bin number</label><input type="text" id="ao-bin" placeholder="e.g. RR-014"></div>
     <div class="field" id="ao-newbin-field" style="display:none;"><label>New empty bin number (going out)</label><input type="text" id="ao-newbin" placeholder="e.g. 88"></div>
     <div class="field"><label>Driver name</label><input type="text" id="ao-driver" placeholder="Driver name"></div>
+    <div class="field"><label>Photo (optional)</label><input type="file" id="ao-photo" accept="image/*"></div>
     <div class="modal-actions">
       <button class="btn-cancel" id="cancelAssignOrder">Cancel</button>
       <button class="btn-save" id="saveAssignOrder">Dispatch & complete</button>
@@ -979,7 +980,7 @@ function renderEntitySwitcher(){
 
 const ROLE_NOTES = {
   admin: 'Master Admin — full access: create, edit, delete, review, manage staff, and view the audit trail across all entities.',
-  maker: 'Maker — you can log new trips. Entries cannot be deleted once recorded; ask a Checker if a correction is needed.',
+  maker: 'Maker — take and dispatch customer orders in the Orders tab. Trip Log here is for reference only.',
   checker: 'Checker — you can view and edit existing trip entries. Deleting entries is restricted to Master Admin.',
   reviewer: 'Reviewer — you can view, filter, and mark trips as reviewed. You cannot create, edit, or delete entries.'
 };
@@ -998,7 +999,7 @@ function enterApp(){
   $('insightsTab').style.display = isMaker() ? 'none' : 'block';
   $('openNewBin').style.display = (canEdit() || isMaker()) ? 'inline-block' : 'none';
   $('openNewLorry').style.display = (canEdit() || isMaker()) ? 'inline-block' : 'none';
-  $('openNew').style.display = canCreate() ? 'inline-block' : 'none';
+  $('openNew').style.display = isMaster() ? 'inline-block' : 'none';
   $('openNewMaintenance').style.display = canCreate() ? 'inline-block' : 'none';
   $('openImportExcel').style.display = canCreate() ? 'inline-block' : 'none';
   $('leakageChip').style.display = canSeeLeakage() ? 'inline-block' : 'none';
@@ -2545,7 +2546,7 @@ function openAssignOrderModal(orderId){
   activeAssignOrderId = orderId;
   const actionLabel = o.action==='deploy' ? 'Bin Out' : o.action==='collect' ? 'Bin In' : 'Exchange';
   $('assignOrderHint').textContent = `${clientName(o.client_id)} — ${siteName(o.site_id)} — ${actionLabel} (${o.waste_type})`;
-  $('ao-lorry').value=''; $('ao-driver').value=''; $('ao-newbin').value='';
+  $('ao-lorry').value=''; $('ao-driver').value=''; $('ao-newbin').value=''; $('ao-photo').value='';
   const linkedTrip = o.linked_trip_id ? TRIPS.find(t=>t.id===o.linked_trip_id) : null;
 
   if(o.action==='exchange'){
@@ -2581,33 +2582,43 @@ $('saveAssignOrder').addEventListener('click', async () => {
   const o = ORDERS.find(x=>x.id===activeAssignOrderId);
   const lorry = $('ao-lorry').value||null;
   const driver = $('ao-driver').value||null;
+  const saveBtn = $('saveAssignOrder');
+  saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+
+  let photoUrl = null;
+  const photoFile = $('ao-photo').files[0];
+  if(photoFile){
+    try{ photoUrl = await uploadTripPhoto(photoFile); }
+    catch(e){ console.error(e); toast('Photo upload failed — continuing without it'); }
+  }
 
   if(o.action==='exchange'){
     const oldBin = $('ao-bin').value.trim();
     const newBin = $('ao-newbin').value.trim();
-    if(!oldBin){ toast('Missing the returning bin number'); return; }
-    if(!newBin){ toast('Enter the new empty bin number going out'); return; }
-    const collectPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: oldBin, driver_name: driver, waste_type: o.waste_type, action: 'collect', notes: o.notes||null, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
-    const deployPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: newBin, driver_name: driver, waste_type: o.waste_type, action: 'deploy', notes: o.notes||null, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
+    if(!oldBin){ toast('Missing the returning bin number'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+    if(!newBin){ toast('Enter the new empty bin number going out'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+    const collectPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: oldBin, driver_name: driver, waste_type: o.waste_type, action: 'collect', notes: o.notes||null, photo_url: photoUrl, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
+    const deployPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: newBin, driver_name: driver, waste_type: o.waste_type, action: 'deploy', notes: o.notes||null, photo_url: photoUrl, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
     const { data: collectData, error: e1 } = await sb.from('trip_log').insert(collectPayload).select().single();
-    if(e1){ console.error(e1); toast('Failed to log the returning bin — check console'); return; }
+    if(e1){ console.error(e1); toast('Failed to log the returning bin — check console'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
     const { data: deployData, error: e2 } = await sb.from('trip_log').insert(deployPayload).select().single();
-    if(e2){ console.error(e2); toast('Returning bin logged, but new bin failed — check console and complete manually'); return; }
+    if(e2){ console.error(e2); toast('Returning bin logged, but new bin failed — check console and complete manually'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
     const { error: orderErr } = await sb.from('orders').update({ status:'completed', completed_trip_id: deployData.id, updated_at: new Date().toISOString() }).eq('id', o.id);
-    if(orderErr){ console.error(orderErr); toast('Trips created but failed to close order — check console'); return; }
+    if(orderErr){ console.error(orderErr); toast('Trips created but failed to close order — check console'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
     await logAudit('dispatch_order_exchange', clientName(o.client_id), `Exchanged bin ${oldBin} → ${newBin}, driver ${driver||'—'}`);
     toast('Exchange dispatched and completed');
   } else {
     const bin = $('ao-bin').value.trim();
-    if(!bin){ toast('Enter the bin number'); return; }
-    const tripPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: bin, driver_name: driver, waste_type: o.waste_type, action: o.action, notes: o.notes||null, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
+    if(!bin){ toast('Enter the bin number'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+    const tripPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: bin, driver_name: driver, waste_type: o.waste_type, action: o.action, notes: o.notes||null, photo_url: photoUrl, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
     const { data: tripData, error: tripErr } = await sb.from('trip_log').insert(tripPayload).select().single();
-    if(tripErr){ console.error(tripErr); toast('Failed to create trip'); return; }
+    if(tripErr){ console.error(tripErr); toast('Failed to create trip'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
     const { error: orderErr } = await sb.from('orders').update({ status:'completed', completed_trip_id: tripData.id, updated_at: new Date().toISOString() }).eq('id', o.id);
-    if(orderErr){ console.error(orderErr); toast('Trip created but failed to close order — check console'); return; }
+    if(orderErr){ console.error(orderErr); toast('Trip created but failed to close order — check console'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
     await logAudit('dispatch_order', clientName(o.client_id), `Assigned & completed — bin ${bin}, driver ${driver||'—'}`);
     toast('Order dispatched and completed');
   }
+  saveBtn.disabled = false; saveBtn.textContent = 'Dispatch & complete';
   $('assignOrderOverlay').classList.remove('show');
   await loadOrders(); renderOrders(); await loadAll();
 });
@@ -3602,7 +3613,7 @@ function resetTripForm(){
 }
 
 $('openNew').addEventListener('click', () => {
-  if(!canCreate()){ toast('You do not have permission to log trips'); return; }
+  if(!isMaster()){ toast('Please use Orders → Assign & Dispatch to log a trip'); return; }
   editingTripId = null;
   $('tripModalTitle').textContent = 'New trip entry';
   $('tripModalHint').textContent = 'Log a bin deployment or pickup trip.';
