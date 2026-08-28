@@ -744,6 +744,7 @@
       <div id="o-client-dropdown" class="combo-dropdown" style="display:none;"></div>
     </div>
     <div class="field"><label>Site</label><select id="o-site"><option value="">Select customer first…</option></select></div>
+    <div class="field" id="o-linkbin-field" style="display:none;"><label>Which bin is being collected?</label><select id="o-linkbin"><option value="">Select bin at this site…</option></select></div>
     <div class="field"><label>Waste type</label>
       <div class="waste-grid" id="o-waste">
         <div class="waste-opt" data-v="carton">Carton</div>
@@ -2322,7 +2323,7 @@ function renderOrders(){
       <td>${fmtDateTime(o.created_at)}</td>
       <td>${clientName(o.client_id)}</td>
       <td>${siteName(o.site_id)}</td>
-      <td><span class="pill ${o.action}">${o.action==='deploy'?'Bin Out':'Bin In'}</span></td>
+      <td><span class="pill ${o.action}">${o.action==='deploy'?'Bin Out':'Bin In'}</span>${o.linked_trip_id ? `<div style="font-size:10px; color:var(--text-dim); margin-top:2px;">🔗 ${(TRIPS.find(t=>t.id===o.linked_trip_id)||{}).bin_number||'—'}</div>` : ''}</td>
       <td><span class="waste-dot ${o.waste_type}"></span>${o.waste_type}</td>
       <td>${o.postpone_count>0 ? `${o.postpone_count}x` : '—'}</td>
       <td>${o.notes||'—'}</td>
@@ -2378,11 +2379,40 @@ function renderOrderClientDropdown(rawText){
 function refreshOrderSiteSelect(clientId){
   const opts = SITES.filter(s=>s.client_id===clientId);
   $('o-site').innerHTML = opts.length ? '<option value="">Select site…</option>' + opts.map(s=>`<option value="${s.id}">${s.site_name}</option>`).join('') : '<option value="">No sites for this customer</option>';
+  refreshOrderLinkBinField();
 }
+function binsCurrentlyAtSite(siteId){
+  if(!siteId) return [];
+  const byBin = {};
+  TRIPS.filter(t=>t.site_id===siteId).forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
+  return Object.values(byBin).filter(t=>t.action==='deploy');
+}
+function refreshOrderLinkBinField(){
+  const showLinkBin = orderActionSel === 'collect';
+  $('o-linkbin-field').style.display = showLinkBin ? 'block' : 'none';
+  if(!showLinkBin){ $('o-linkbin').value=''; return; }
+  const siteId = $('o-site').value;
+  const bins = binsCurrentlyAtSite(siteId);
+  if(bins.length===0){
+    $('o-linkbin').innerHTML = '<option value="">No bins currently recorded at this site</option>';
+    return;
+  }
+  $('o-linkbin').innerHTML = '<option value="">Select bin at this site…</option>' + bins.map(b=>`<option value="${b.id}">${b.bin_number} — ${b.waste_type}, out ${daysSince(b.trip_date)}d</option>`).join('');
+}
+$('o-site').addEventListener('change', refreshOrderLinkBinField);
+$('o-linkbin').addEventListener('change', () => {
+  const tripId = $('o-linkbin').value;
+  if(!tripId) return;
+  const trip = TRIPS.find(t=>t.id===tripId);
+  if(trip){
+    orderWasteSel = trip.waste_type;
+    document.querySelectorAll('#o-waste .waste-opt').forEach(x=>x.classList.toggle('sel', x.dataset.v===trip.waste_type));
+  }
+});
 $('o-client-search').addEventListener('input', () => { $('o-client').value=''; renderOrderClientDropdown($('o-client-search').value); });
 $('o-client-search').addEventListener('focus', () => renderOrderClientDropdown($('o-client-search').value));
 document.addEventListener('click', (e) => { if(!e.target.closest('#o-client-search') && !e.target.closest('#o-client-dropdown')){ $('o-client-dropdown').style.display='none'; } });
-document.querySelectorAll('#o-action .action-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#o-action .action-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); orderActionSel=opt.dataset.v; }));
+document.querySelectorAll('#o-action .action-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#o-action .action-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); orderActionSel=opt.dataset.v; refreshOrderLinkBinField(); }));
 document.querySelectorAll('#o-waste .waste-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#o-waste .waste-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); orderWasteSel=opt.dataset.v; }));
 
 $('openNewOrder').addEventListener('click', () => {
@@ -2396,6 +2426,8 @@ $('openNewOrder').addEventListener('click', () => {
   orderActionSel=null; orderWasteSel=null;
   document.querySelectorAll('#o-action .action-opt').forEach(o=>o.classList.remove('sel'));
   document.querySelectorAll('#o-waste .waste-opt').forEach(o=>o.classList.remove('sel'));
+  $('o-linkbin-field').style.display = 'none';
+  $('o-linkbin').innerHTML = '<option value="">Select bin at this site…</option>';
   $('orderOverlay').classList.add('show');
 });
 function openOrderModal(orderId){
@@ -2411,6 +2443,8 @@ function openOrderModal(orderId){
   orderActionSel = o.action; orderWasteSel = o.waste_type;
   document.querySelectorAll('#o-action .action-opt').forEach(x=>x.classList.toggle('sel', x.dataset.v===o.action));
   document.querySelectorAll('#o-waste .waste-opt').forEach(x=>x.classList.toggle('sel', x.dataset.v===o.waste_type));
+  refreshOrderLinkBinField();
+  if(o.linked_trip_id) $('o-linkbin').value = o.linked_trip_id;
   $('orderOverlay').classList.add('show');
 }
 $('closeOrder').addEventListener('click', () => $('orderOverlay').classList.remove('show'));
@@ -2421,11 +2455,12 @@ $('saveOrder').addEventListener('click', async () => {
   if(!$('o-client').value){ toast('Select a customer'); return; }
   if(!$('o-site').value){ toast('Select a site'); return; }
   if(!$('o-date').value){ toast('Select a target date'); return; }
+  const linkedTripId = orderActionSel==='collect' ? ($('o-linkbin').value || null) : null;
 
   if(editingOrderId){
     const { error } = await sb.from('orders').update({
       client_id: $('o-client').value, site_id: $('o-site').value, action: orderActionSel, waste_type: orderWasteSel,
-      target_date: $('o-date').value, notes: $('o-notes').value||null, updated_at: new Date().toISOString()
+      target_date: $('o-date').value, notes: $('o-notes').value||null, linked_trip_id: linkedTripId, updated_at: new Date().toISOString()
     }).eq('id', editingOrderId);
     if(error){ console.error(error); toast('Failed to update order'); return; }
     await logAudit('edit_order', clientName($('o-client').value), 'Updated order details');
@@ -2434,7 +2469,8 @@ $('saveOrder').addEventListener('click', async () => {
     const { error } = await sb.from('orders').insert({
       entity_id: ACTIVE_ENTITY_ID, client_id: $('o-client').value, site_id: $('o-site').value,
       action: orderActionSel, waste_type: orderWasteSel, target_date: $('o-date').value,
-      original_target_date: $('o-date').value, notes: $('o-notes').value||null, taken_by: CURRENT_USER.name
+      original_target_date: $('o-date').value, notes: $('o-notes').value||null, taken_by: CURRENT_USER.name,
+      linked_trip_id: linkedTripId
     });
     if(error){ console.error(error); toast('Failed to save order'); return; }
     await logAudit('create_order', clientName($('o-client').value), `New order taken for ${fmtDate($('o-date').value)}`);
@@ -2503,7 +2539,9 @@ function openAssignOrderModal(orderId){
   if(!o || !canAssignOrder()) return;
   activeAssignOrderId = orderId;
   $('assignOrderHint').textContent = `${clientName(o.client_id)} — ${siteName(o.site_id)} — ${o.action==='deploy'?'Bin Out':'Bin In'} (${o.waste_type})`;
-  $('ao-lorry').value=''; $('ao-bin').value=''; $('ao-driver').value='';
+  $('ao-lorry').value=''; $('ao-driver').value='';
+  const linkedTrip = o.linked_trip_id ? TRIPS.find(t=>t.id===o.linked_trip_id) : null;
+  $('ao-bin').value = linkedTrip ? linkedTrip.bin_number : '';
   $('assignOrderOverlay').classList.add('show');
 }
 $('closeAssignOrder').addEventListener('click', () => $('assignOrderOverlay').classList.remove('show'));
