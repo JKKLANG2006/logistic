@@ -833,7 +833,7 @@
 <div class="overlay" id="receiveBinOverlay">
   <div class="modal">
     <button class="close-x" id="closeReceiveBin">✕</button>
-    <h2>Receive bin into warehouse</h2>
+    <h2 id="receiveBinTitle">Receive bin into warehouse</h2>
     <div class="field"><label>Bin number</label><input type="text" id="rb-bin" placeholder="e.g. RR-014"></div>
     <div class="field"><label>Warehouse</label><select id="rb-warehouse"><option value="">Select warehouse…</option></select></div>
     <div class="field"><label>Received date</label><input type="date" id="rb-date"></div>
@@ -2673,9 +2673,21 @@ function renderWarehouse(){
         <td>${dateCell}</td>
         <td>${w.condition_notes||'—'}</td>
         <td>${w.logged_by||'—'}</td>
-        <td></td>
+        <td>${canEdit() ? `<button class="row-btn edit" data-editwhlog="${w.id}">Edit</button>` : ''}${canDelete() ? `<button class="row-btn del" data-delwhlog="${w.id}" data-bin="${w.bin_number}">Delete</button>` : ''}</td>
       </tr>`;
     }).join('');
+    body.querySelectorAll('[data-editwhlog]').forEach(btn => btn.addEventListener('click', () => openEditWarehouseLogModal(btn.dataset.editwhlog)));
+    body.querySelectorAll('[data-delwhlog]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if(!confirm(`Remove bin ${btn.dataset.bin} from the warehouse log? Use this if it was recorded by mistake or the bin has since been sold.`)) return;
+        const { error } = await sb.from('bin_warehouse_log').delete().eq('id', btn.dataset.delwhlog);
+        if(error){ console.error(error); toast('Failed to delete — check console'); return; }
+        await logAudit('delete_warehouse_log', btn.dataset.bin, 'Removed warehouse log entry');
+        toast('Entry removed');
+        await loadWarehouseData(); renderWarehouse();
+        if($('view-bins').classList.contains('active')) renderBins();
+      });
+    });
   }
 
   const locBody = $('warehouseLocBody');
@@ -2740,12 +2752,29 @@ $('saveWarehouseLoc').addEventListener('click', async () => {
   await loadWarehouseData(); renderWarehouse();
 });
 
+let editingWarehouseLogId = null;
 $('openReceiveBin').addEventListener('click', () => {
+  editingWarehouseLogId = null;
+  $('receiveBinTitle').textContent = 'Receive bin into warehouse';
+  $('saveReceiveBin').textContent = 'Receive bin';
   $('rb-bin').value=''; $('rb-notes').value='';
   $('rb-date').value = todayISO();
   $('rb-warehouse').innerHTML = '<option value="">Select warehouse…</option>' + WAREHOUSE_LOCATIONS.map(w=>`<option value="${w.id}">${w.warehouse_name}</option>`).join('');
   $('receiveBinOverlay').classList.add('show');
 });
+function openEditWarehouseLogModal(id){
+  const w = WAREHOUSE_LOG.find(x=>x.id===id);
+  if(!w || !canEdit()) return;
+  editingWarehouseLogId = id;
+  $('receiveBinTitle').textContent = 'Edit warehouse log entry';
+  $('saveReceiveBin').textContent = 'Save changes';
+  $('rb-warehouse').innerHTML = '<option value="">Select warehouse…</option>' + WAREHOUSE_LOCATIONS.map(x=>`<option value="${x.id}">${x.warehouse_name}</option>`).join('');
+  $('rb-bin').value = w.bin_number;
+  $('rb-warehouse').value = w.warehouse_id;
+  $('rb-date').value = w.received_date;
+  $('rb-notes').value = w.condition_notes || '';
+  $('receiveBinOverlay').classList.add('show');
+}
 $('closeReceiveBin').addEventListener('click', () => $('receiveBinOverlay').classList.remove('show'));
 $('cancelReceiveBin').addEventListener('click', () => $('receiveBinOverlay').classList.remove('show'));
 $('saveReceiveBin').addEventListener('click', async () => {
@@ -2753,13 +2782,19 @@ $('saveReceiveBin').addEventListener('click', async () => {
   if(!bin){ toast('Enter the bin number'); return; }
   if(!$('rb-warehouse').value){ toast('Select a warehouse'); return; }
   if(!$('rb-date').value){ toast('Select the received date'); return; }
-  const { error } = await sb.from('bin_warehouse_log').insert({
-    entity_id: ACTIVE_ENTITY_ID, bin_number: bin, warehouse_id: $('rb-warehouse').value,
-    received_date: $('rb-date').value, condition_notes: $('rb-notes').value||null, logged_by: CURRENT_USER.name
-  });
-  if(error){ console.error(error); toast('Failed to save — check console'); return; }
-  await logAudit('receive_warehouse_bin', bin, `Received into ${warehouseName($('rb-warehouse').value)}`);
-  toast('Bin received into warehouse');
+  const payload = { bin_number: bin, warehouse_id: $('rb-warehouse').value, received_date: $('rb-date').value, condition_notes: $('rb-notes').value||null };
+
+  if(editingWarehouseLogId){
+    const { error } = await sb.from('bin_warehouse_log').update(payload).eq('id', editingWarehouseLogId);
+    if(error){ console.error(error); toast('Failed to update — check console'); return; }
+    await logAudit('edit_warehouse_log', bin, `Updated warehouse log entry — ${warehouseName($('rb-warehouse').value)}`);
+    toast('Entry updated');
+  } else {
+    const { error } = await sb.from('bin_warehouse_log').insert({ ...payload, entity_id: ACTIVE_ENTITY_ID, logged_by: CURRENT_USER.name });
+    if(error){ console.error(error); toast('Failed to save — check console'); return; }
+    await logAudit('receive_warehouse_bin', bin, `Received into ${warehouseName($('rb-warehouse').value)}`);
+    toast('Bin received into warehouse');
+  }
   $('receiveBinOverlay').classList.remove('show');
   await loadWarehouseData(); renderWarehouse();
   if($('view-bins').classList.contains('active')) renderBins();
