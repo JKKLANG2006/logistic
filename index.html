@@ -63,11 +63,13 @@
   .tab{ font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14.5px; padding: 10px 15px; border-radius:8px; cursor:pointer; color:var(--text-dim); border: 1px solid transparent; }
   .tab.active{ background: var(--panel); border-color:var(--border); color: var(--text); }
   .tab::before{ content:''; display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:7px; vertical-align:middle; }
+  .tab[data-view="orders"]::before{ background: var(--pink); }
   .tab[data-view="log"]::before{ background: var(--blue); }
   .tab[data-view="bins"]::before{ background: var(--sage); }
   .tab[data-view="maintenance"]::before{ background: var(--violet); }
   .tab[data-view="binregistry"]::before{ background: var(--carton); }
   .tab[data-view="lorryregistry"]::before{ background: var(--metal); }
+  .tab[data-view="warehouse"]::before{ background: var(--teal); }
   .tab[data-view="insights"]::before{ display:none; }
   .tab[data-view="customers"]::before{ background: var(--teal); }
   .tab[data-view="audit"]::before{ background: var(--red); }
@@ -238,11 +240,13 @@
     </div>
   </div>
   <div class="tabs" id="tabs">
+    <div class="tab" data-view="orders">Orders</div>
     <div class="tab active" data-view="log">Trip Log</div>
     <div class="tab" data-view="bins">Bin Tracker</div>
     <div class="tab" data-view="maintenance">Maintenance</div>
     <div class="tab" data-view="binregistry">Bins</div>
     <div class="tab" data-view="lorryregistry">Lorries</div>
+    <div class="tab" data-view="warehouse">Warehouse</div>
     <div class="tab" data-view="insights" id="insightsTab" style="display:none;">📊 Insights</div>
     <div class="tab" data-view="customers" id="customersTab" style="display:none;">Customers</div>
     <div class="tab" data-view="audit" id="auditTab" style="display:none;">Audit Trail</div>
@@ -252,6 +256,25 @@
 </header>
 
 <main>
+  <div class="view" id="view-orders">
+    <div class="section-head">
+      <h2>Orders</h2>
+      <button class="btn-new" id="openNewOrder" style="display:none;">+ New Order</button>
+    </div>
+    <div class="filters">
+      <span class="fchip active" data-orderstatus="pending">Pending</span>
+      <span class="fchip" data-orderstatus="completed">Completed</span>
+      <span class="fchip" data-orderstatus="cancelled">Cancelled</span>
+      <span class="fchip" data-orderstatus="all">All</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Target Date</th><th>Customer</th><th>Site</th><th>Action</th><th>Waste</th><th>Postponed</th><th>Notes</th><th>Taken By</th><th></th></tr></thead>
+        <tbody id="ordersBody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="view active" id="view-log">
     <div id="alertsWidget" style="display:none;"></div>
     <div class="role-note" id="roleNote"></div>
@@ -359,6 +382,36 @@
       </table>
     </div>
   </div>
+
+  <div class="view" id="view-warehouse">
+    <div class="section-head">
+      <h2>Warehouse</h2>
+      <div>
+        <button class="btn-ghost" id="openNewWarehouseLoc" style="display:none;">+ Add location</button>
+        <button class="btn-new" id="openReceiveBin" style="display:none;">+ Receive bin</button>
+      </div>
+    </div>
+    <div class="filters">
+      <span class="fchip active" data-whfilter="all">All bins</span>
+      <span class="fchip" data-whfilter="idle" id="whLeakageChip" style="display:none;">⚠ Idle 14+ days</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Bin No.</th><th>Warehouse</th><th>Received</th><th>Condition</th><th>Logged by</th><th></th></tr></thead>
+        <tbody id="warehouseLogBody"></tbody>
+      </table>
+    </div>
+    <div class="section-head" style="margin-top:22px;">
+      <h3 style="font-size:14px;">Locations</h3>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Warehouse name</th><th>Address</th><th>Notes</th><th></th></tr></thead>
+        <tbody id="warehouseLocBody"></tbody>
+      </table>
+    </div>
+  </div>
+
 
   <div class="view" id="view-insights">
     <div class="section-head">
@@ -665,6 +718,121 @@
   </div>
 </div>
 
+<div class="overlay" id="orderOverlay">
+  <div class="modal">
+    <button class="close-x" id="closeOrder">✕</button>
+    <h2 id="orderModalTitle">New order</h2>
+    <div class="hint">Record a customer's request before a driver/bin is assigned.</div>
+    <div class="field"><label>Action</label>
+      <div class="action-grid" id="o-action">
+        <div class="action-opt" data-v="deploy">Bin Out</div>
+        <div class="action-opt" data-v="collect">Bin In</div>
+      </div>
+    </div>
+    <div class="field"><label>Target date</label><input type="date" id="o-date"></div>
+    <div class="field" style="position:relative;"><label>Customer</label>
+      <input type="text" id="o-client-search" placeholder="Type to search customer…" autocomplete="off">
+      <input type="hidden" id="o-client" value="">
+      <div id="o-client-dropdown" class="combo-dropdown" style="display:none;"></div>
+    </div>
+    <div class="field"><label>Site</label><select id="o-site"><option value="">Select customer first…</option></select></div>
+    <div class="field"><label>Waste type</label>
+      <div class="waste-grid" id="o-waste">
+        <div class="waste-opt" data-v="carton">Carton</div>
+        <div class="waste-opt" data-v="plastic">Plastic</div>
+        <div class="waste-opt" data-v="metal">Metal</div>
+        <div class="waste-opt" data-v="general">Rubbish</div>
+      </div>
+    </div>
+    <div class="field"><label>Notes (optional)</label><textarea id="o-notes"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelOrder">Cancel</button>
+      <button class="btn-save" id="saveOrder">Save order</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="assignOrderOverlay">
+  <div class="modal">
+    <button class="close-x" id="closeAssignOrder">✕</button>
+    <h2>Assign & dispatch</h2>
+    <div class="hint" id="assignOrderHint">Assign a driver, lorry, and bin — this creates the trip and marks the order completed.</div>
+    <div class="field" style="position:relative;"><label>Lorry number</label>
+      <input type="text" id="ao-lorry" placeholder="e.g. WXY 1234" autocomplete="off">
+      <div id="ao-lorry-dropdown" class="combo-dropdown" style="display:none;"></div>
+    </div>
+    <div class="field"><label>Bin number</label><input type="text" id="ao-bin" placeholder="e.g. RR-014"></div>
+    <div class="field"><label>Driver name</label><input type="text" id="ao-driver" placeholder="Driver name"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelAssignOrder">Cancel</button>
+      <button class="btn-save" id="saveAssignOrder">Dispatch & complete</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="postponeOverlay">
+  <div class="modal">
+    <button class="close-x" id="closePostpone">✕</button>
+    <h2>Postpone order</h2>
+    <div class="hint" id="postponeHint"></div>
+    <div class="field"><label>New target date</label><input type="date" id="p-newdate"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelPostpone">Cancel</button>
+      <button class="btn-save" id="savePostpone">Postpone</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="cancelOrderOverlay">
+  <div class="modal">
+    <button class="close-x" id="closeCancelOrder">✕</button>
+    <h2>Cancel order</h2>
+    <div class="hint">A reason is required — this stays on record.</div>
+    <div class="field"><label>Reason</label>
+      <div class="waste-grid" id="co-reason" style="grid-template-columns:1fr 1fr;">
+        <div class="waste-opt" data-v="Lorry breakdown">Lorry breakdown</div>
+        <div class="waste-opt" data-v="Customer not around">Customer not around</div>
+        <div class="waste-opt" data-v="Duplicate entry">Duplicate entry</div>
+        <div class="waste-opt" data-v="Customer cancelled">Customer cancelled</div>
+      </div>
+    </div>
+    <div class="field"><label>Other reason (if not listed above)</label><input type="text" id="co-other" placeholder="Describe the reason"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelCancelOrder">Back</button>
+      <button class="btn-save" id="saveCancelOrder">Cancel order</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="warehouseLocOverlay">
+  <div class="modal">
+    <button class="close-x" id="closeWarehouseLoc">✕</button>
+    <h2 id="warehouseLocTitle">Add warehouse location</h2>
+    <div class="field"><label>Warehouse name</label><input type="text" id="wl-name" placeholder="e.g. Standby Warehouse"></div>
+    <div class="field"><label>Address (optional)</label><input type="text" id="wl-address"></div>
+    <div class="field"><label>Notes (optional)</label><textarea id="wl-notes"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelWarehouseLoc">Cancel</button>
+      <button class="btn-save" id="saveWarehouseLoc">Save location</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="receiveBinOverlay">
+  <div class="modal">
+    <button class="close-x" id="closeReceiveBin">✕</button>
+    <h2>Receive bin into warehouse</h2>
+    <div class="field"><label>Bin number</label><input type="text" id="rb-bin" placeholder="e.g. RR-014"></div>
+    <div class="field"><label>Warehouse</label><select id="rb-warehouse"><option value="">Select warehouse…</option></select></div>
+    <div class="field"><label>Received date</label><input type="date" id="rb-date"></div>
+    <div class="field"><label>Condition notes (optional)</label><textarea id="rb-notes" placeholder="e.g. Good condition, minor dent, etc."></textarea></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelReceiveBin">Cancel</button>
+      <button class="btn-save" id="saveReceiveBin">Receive bin</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="importExcelOverlay">
   <div class="modal" style="max-width:640px;">
     <button class="close-x" id="closeImportExcel">✕</button>
@@ -696,6 +864,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 
 let ENTITIES = [], CLIENTS = [], SITES = [], TRIPS = [], AUDIT = [], STAFF = [], MAINTENANCE = [], LORRY_REGISTRY = [];
+let ORDERS = [], ORDER_POSTPONEMENTS = [], WAREHOUSE_LOCATIONS = [], WAREHOUSE_LOG = [];
 let filterMStatus = 'all', editingMaintenanceId = null;
 let pendingPhotoFile = null, existingPhotoUrl = null, removeExistingPhoto = false;
 let newWasteSelection=null, newActionSelection=null, newStaffRole='maker';
@@ -849,6 +1018,10 @@ function subscribeRealtime(){
     .on('postgres_changes', { event: '*', schema: 'public', table: 'bin_maintenance', filter }, debouncedRealtimeReload)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'bin_registry', filter }, debouncedRealtimeReload)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'lorry_registry', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'order_postponements', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_registry', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'bin_warehouse_log', filter }, debouncedRealtimeReload)
     .on('presence', { event: 'sync' }, renderPresence)
     .on('presence', { event: 'join' }, renderPresence)
     .on('presence', { event: 'leave' }, renderPresence)
@@ -971,6 +1144,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     tab.classList.add('active');
     document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
     $('view-' + tab.dataset.view).classList.add('active');
+    if(tab.dataset.view === 'orders') { await loadOrders(); renderOrders(); }
     if(tab.dataset.view === 'bins') { await loadLeakageAcks(); renderBins(); }
     if(tab.dataset.view === 'maintenance') { await loadMaintenance(); renderMaintenance(); }
     if(tab.dataset.view === 'audit') renderAudit();
@@ -978,6 +1152,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if(tab.dataset.view === 'customers') { await loadCustomerLeakageAcks(); renderCustomers(); }
     if(tab.dataset.view === 'binregistry') { await loadBinRegistry(); renderBinRegistry(); }
     if(tab.dataset.view === 'lorryregistry') { renderLorryRegistry(); }
+    if(tab.dataset.view === 'warehouse') { await loadWarehouseData(); renderWarehouse(); }
     if(tab.dataset.view === 'insights') { renderInsights(); }
   });
 });
@@ -990,17 +1165,25 @@ async function loadAll(){
     sb.from('logistics_sites').select('id,client_id,site_name,city,state').eq('entity_id', ACTIVE_ENTITY_ID),
     sb.from('trip_log').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('trip_date', {ascending:false}).order('created_at', {ascending:false}),
     sb.from('bin_maintenance').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('sent_date', {ascending:false}).order('created_at', {ascending:false}),
-    sb.from('lorry_registry').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('lorry_number')
+    sb.from('lorry_registry').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('lorry_number'),
+    sb.from('orders').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('target_date'),
+    sb.from('order_postponements').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('postponed_at', {ascending:false}),
+    sb.from('warehouse_registry').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('warehouse_name'),
+    sb.from('bin_warehouse_log').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('received_date', {ascending:false}).order('created_at', {ascending:false})
   ];
   if(canSeeAudit()) queries.push(sb.from('logistics_audit_logs').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('created_at', {ascending:false}).limit(300));
   const results = await Promise.all(queries);
-  const [{data: clients, error: ce}, {data: sites, error: se}, {data: trips, error: te}, {data: maint, error: me}, {data: lorries, error: le}] = results;
-  if(ce||se||te||me||le){ console.error(ce,se,te,me,le); toast('Error loading data — check console'); return; }
+  const [{data: clients, error: ce}, {data: sites, error: se}, {data: trips, error: te}, {data: maint, error: me}, {data: lorries, error: le},
+         {data: ord, error: oe}, {data: pp, error: pe}, {data: whLocs, error: we}, {data: whLog, error: wle}] = results;
+  if(ce||se||te||me||le||oe||pe||we||wle){ console.error(ce,se,te,me,le,oe,pe,we,wle); toast('Error loading data — check console'); return; }
   CLIENTS = clients||[]; SITES = sites||[]; TRIPS = trips||[]; MAINTENANCE = maint||[]; LORRY_REGISTRY = lorries||[];
-  if(canSeeAudit()){ const ares = results[5]; if(ares.error){ console.error(ares.error); } AUDIT = ares.data||[]; }
+  ORDERS = ord||[]; ORDER_POSTPONEMENTS = pp||[]; WAREHOUSE_LOCATIONS = whLocs||[]; WAREHOUSE_LOG = whLog||[];
+  if(canSeeAudit()){ const ares = results[9]; if(ares.error){ console.error(ares.error); } AUDIT = ares.data||[]; }
   populateFilterSelects();
   renderLog();
   renderAlertsWidget();
+  if($('view-orders').classList.contains('active')) renderOrders();
+  if($('view-warehouse').classList.contains('active')) renderWarehouse();
   if($('view-bins').classList.contains('active')) { await loadLeakageAcks(); renderBins(); }
   if($('view-audit').classList.contains('active')) renderAudit();
   if($('view-staff').classList.contains('active')) renderStaff();
@@ -1341,16 +1524,19 @@ function renderBins(){
   const grid = $('binGrid');
   if(bins.length===0){ grid.innerHTML='<div class="empty-state">No bins match this view</div>'; return; }
   const inRepair = openBinRepairs();
+  const inWarehouse = {}; currentWarehouseBins().forEach(w => { inWarehouse[w.bin_number] = w; });
   grid.innerHTML = bins.map(b => {
     const ds = daysSince(b.trip_date);
     const ack = lastAckFor(b.bin_number);
     const repair = inRepair[b.bin_number];
+    const warehouse = inWarehouse[b.bin_number];
     return `
     <div class="bin-card ${b._isLeaking?'leaking':''}" data-waste="${b.waste_type}">
       <div class="bnum">${b.bin_number}</div>
       <div class="status"><span class="pill ${b.action}">${b.action==='deploy'?'Bin Out':'Bin In'}</span></div>
       ${b._isLeaking ? `<div class="leak-badge">⚠ ${ds} days at site</div>` : ''}
       ${repair ? `<div class="leak-badge" style="color:var(--violet); background:rgba(110,95,199,0.12);">🔧 In repair at ${repair.workshop_name} since ${fmtDate(repair.sent_date)}</div>` : ''}
+      ${warehouse ? `<div class="leak-badge" style="color:var(--teal); background:rgba(42,157,143,0.12);">📦 In warehouse (${warehouseName(warehouse.warehouse_id)}) since ${fmtDate(warehouse.received_date)}</div>` : ''}
       <div class="meta"><b>${clientName(b.client_id)}</b><br>${siteName(b.site_id)}<br>
       <span class="waste-dot ${b.waste_type}"></span>${b.waste_type}<br>
       Last trip: ${fmtDate(b.trip_date)}${b.driver_name?' · '+b.driver_name:''}</div>
@@ -2023,6 +2209,432 @@ $('confirmImportExcel').addEventListener('click', async () => {
   await loadAll();
 });
 
+// ===== Orders workflow =====
+let filterOrderStatus = 'pending';
+let editingOrderId = null;
+let orderActionSel = null, orderWasteSel = null;
+let activePostponeOrderId = null, activeCancelOrderId = null, activeAssignOrderId = null;
+const ORDER_LEAKAGE_THRESHOLD_DAYS = 2;
+
+function canCreateOrder(){ return isMaster() || isMaker(); }
+function canEditOrder(){ return isMaster() || isChecker() || isMaker(); }
+function canAssignOrder(){ return isMaster() || isMaker(); }
+
+async function loadOrders(){
+  const [{data: ord, error: e1}, {data: pp, error: e2}] = await Promise.all([
+    sb.from('orders').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('target_date'),
+    sb.from('order_postponements').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('postponed_at', {ascending:false})
+  ]);
+  if(e1||e2){ console.error(e1,e2); return; }
+  ORDERS = ord||[]; ORDER_POSTPONEMENTS = pp||[];
+}
+
+function orderIsOverdue(o){
+  return o.status==='pending' && o.target_date < todayISO() && daysSince(o.target_date) >= ORDER_LEAKAGE_THRESHOLD_DAYS;
+}
+
+function renderOrders(){
+  $('openNewOrder').style.display = canCreateOrder() ? 'inline-block' : 'none';
+  let rows = filterOrderStatus==='all' ? ORDERS : ORDERS.filter(o=>o.status===filterOrderStatus);
+  rows = [...rows].sort((a,b) => a.target_date.localeCompare(b.target_date));
+  const body = $('ordersBody');
+  if(rows.length===0){ body.innerHTML = '<tr><td colspan="9"><div class="empty-state">No orders in this view</div></td></tr>'; return; }
+
+  body.innerHTML = rows.map(o => {
+    const overdue = orderIsOverdue(o);
+    const dateCell = overdue
+      ? `<span style="color:var(--red); font-weight:600;">⚠ ${fmtDate(o.target_date)}</span>`
+      : fmtDate(o.target_date);
+    const statusPill = o.status==='pending' ? `<span class="pill deploy">Pending</span>`
+      : o.status==='completed' ? `<span class="pill collect">Completed</span>`
+      : `<span class="pill" style="color:var(--red); background:rgba(196,68,31,0.12);">Cancelled</span>`;
+    let actions = '';
+    if(o.status==='pending'){
+      if(canAssignOrder()) actions += `<button class="row-btn" data-assign="${o.id}">Assign &amp; Dispatch</button>`;
+      if(canEditOrder()) actions += `<button class="row-btn edit" data-editorder="${o.id}">Edit</button><button class="row-btn" data-postpone="${o.id}">Postpone</button><button class="row-btn del" data-cancelorder="${o.id}">Cancel</button>`;
+      if(overdue && canSeeLeakage()) actions += `<button class="ack-btn" style="margin-top:4px;" data-ackorder="${o.id}" data-days="${daysSince(o.target_date)}">Acknowledge</button>`;
+    } else if(o.status==='cancelled'){
+      actions = `<span style="font-size:11px; color:var(--text-dim);">${o.cancelled_reason||''}</span>`;
+    } else {
+      actions = statusPill;
+    }
+    return `
+    <tr>
+      <td>${dateCell}</td>
+      <td>${clientName(o.client_id)}</td>
+      <td>${siteName(o.site_id)}</td>
+      <td><span class="pill ${o.action}">${o.action==='deploy'?'Bin Out':'Bin In'}</span></td>
+      <td><span class="waste-dot ${o.waste_type}"></span>${o.waste_type}</td>
+      <td>${o.postpone_count>0 ? `${o.postpone_count}x` : '—'}</td>
+      <td>${o.notes||'—'}</td>
+      <td>${o.taken_by||'—'}</td>
+      <td>${o.status==='pending' ? actions : statusPill + (actions && o.status==='cancelled' ? '<br>'+actions : '')}</td>
+    </tr>`;
+  }).join('');
+
+  body.querySelectorAll('[data-editorder]').forEach(btn => btn.addEventListener('click', () => openOrderModal(btn.dataset.editorder)));
+  body.querySelectorAll('[data-postpone]').forEach(btn => btn.addEventListener('click', () => openPostponeModal(btn.dataset.postpone)));
+  body.querySelectorAll('[data-cancelorder]').forEach(btn => btn.addEventListener('click', () => openCancelOrderModal(btn.dataset.cancelorder)));
+  body.querySelectorAll('[data-assign]').forEach(btn => btn.addEventListener('click', () => openAssignOrderModal(btn.dataset.assign)));
+  body.querySelectorAll('[data-ackorder]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const o = ORDERS.find(x=>x.id===btn.dataset.ackorder);
+      const note = prompt(`Optional note about this overdue order for ${clientName(o.client_id)}`) || null;
+      const { error } = await sb.from('bin_leakage_acks').insert({
+        entity_id: ACTIVE_ENTITY_ID, bin_number: 'ORDER:'+o.id.slice(0,8), client_id: o.client_id, site_id: o.site_id,
+        days_at_time: parseInt(btn.dataset.days,10), acknowledged_by: CURRENT_USER.name, acknowledged_by_role: CURRENT_USER.role, note
+      });
+      if(error){ console.error(error); toast('Failed to record'); return; }
+      await logAudit('acknowledge_order_overdue', clientName(o.client_id), `Acknowledged overdue order (${btn.dataset.days}d)${note?': '+note:''}`);
+      toast('Acknowledged');
+    });
+  });
+}
+document.querySelectorAll('[data-orderstatus]').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('[data-orderstatus]').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    filterOrderStatus = chip.dataset.orderstatus;
+    renderOrders();
+  });
+});
+
+// --- New/Edit order modal ---
+function populateOrderClientSearch(){ $('o-client-search').value=''; $('o-client').value=''; }
+function renderOrderClientDropdown(rawText){
+  const dd = $('o-client-dropdown');
+  const q = (rawText||'').trim().toLowerCase();
+  const matches = (q ? CLIENTS.filter(c=>c.name.toLowerCase().includes(q)) : CLIENTS).slice(0,50);
+  if(matches.length===0){ dd.style.display='none'; return; }
+  dd.innerHTML = matches.map(c=>`<div class="combo-item" data-id="${c.id}" data-label="${c.name.replace(/"/g,'&quot;')}">${c.name}</div>`).join('');
+  dd.style.display='block';
+  dd.querySelectorAll('.combo-item').forEach(item => {
+    item.addEventListener('click', () => {
+      $('o-client').value = item.dataset.id; $('o-client-search').value = item.dataset.label;
+      dd.style.display='none';
+      refreshOrderSiteSelect(item.dataset.id);
+    });
+  });
+}
+function refreshOrderSiteSelect(clientId){
+  const opts = SITES.filter(s=>s.client_id===clientId);
+  $('o-site').innerHTML = opts.length ? '<option value="">Select site…</option>' + opts.map(s=>`<option value="${s.id}">${s.site_name}</option>`).join('') : '<option value="">No sites for this customer</option>';
+}
+$('o-client-search').addEventListener('input', () => { $('o-client').value=''; renderOrderClientDropdown($('o-client-search').value); });
+$('o-client-search').addEventListener('focus', () => renderOrderClientDropdown($('o-client-search').value));
+document.addEventListener('click', (e) => { if(!e.target.closest('#o-client-search') && !e.target.closest('#o-client-dropdown')){ $('o-client-dropdown').style.display='none'; } });
+document.querySelectorAll('#o-action .action-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#o-action .action-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); orderActionSel=opt.dataset.v; }));
+document.querySelectorAll('#o-waste .waste-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#o-waste .waste-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); orderWasteSel=opt.dataset.v; }));
+
+$('openNewOrder').addEventListener('click', () => {
+  editingOrderId = null;
+  $('orderModalTitle').textContent = 'New order';
+  $('saveOrder').textContent = 'Save order';
+  populateOrderClientSearch();
+  $('o-site').innerHTML = '<option value="">Select customer first…</option>';
+  $('o-date').value = todayISO();
+  $('o-notes').value = '';
+  orderActionSel=null; orderWasteSel=null;
+  document.querySelectorAll('#o-action .action-opt').forEach(o=>o.classList.remove('sel'));
+  document.querySelectorAll('#o-waste .waste-opt').forEach(o=>o.classList.remove('sel'));
+  $('orderOverlay').classList.add('show');
+});
+function openOrderModal(orderId){
+  const o = ORDERS.find(x=>x.id===orderId);
+  if(!o || !canEditOrder()) return;
+  editingOrderId = orderId;
+  $('orderModalTitle').textContent = 'Edit order';
+  $('saveOrder').textContent = 'Save changes';
+  $('o-client-search').value = clientName(o.client_id); $('o-client').value = o.client_id;
+  refreshOrderSiteSelect(o.client_id); $('o-site').value = o.site_id;
+  $('o-date').value = o.target_date;
+  $('o-notes').value = o.notes || '';
+  orderActionSel = o.action; orderWasteSel = o.waste_type;
+  document.querySelectorAll('#o-action .action-opt').forEach(x=>x.classList.toggle('sel', x.dataset.v===o.action));
+  document.querySelectorAll('#o-waste .waste-opt').forEach(x=>x.classList.toggle('sel', x.dataset.v===o.waste_type));
+  $('orderOverlay').classList.add('show');
+}
+$('closeOrder').addEventListener('click', () => $('orderOverlay').classList.remove('show'));
+$('cancelOrder').addEventListener('click', () => $('orderOverlay').classList.remove('show'));
+$('saveOrder').addEventListener('click', async () => {
+  if(!orderActionSel){ toast('Select Bin Out or Bin In'); return; }
+  if(!orderWasteSel){ toast('Select waste type'); return; }
+  if(!$('o-client').value){ toast('Select a customer'); return; }
+  if(!$('o-site').value){ toast('Select a site'); return; }
+  if(!$('o-date').value){ toast('Select a target date'); return; }
+
+  if(editingOrderId){
+    const { error } = await sb.from('orders').update({
+      client_id: $('o-client').value, site_id: $('o-site').value, action: orderActionSel, waste_type: orderWasteSel,
+      target_date: $('o-date').value, notes: $('o-notes').value||null, updated_at: new Date().toISOString()
+    }).eq('id', editingOrderId);
+    if(error){ console.error(error); toast('Failed to update order'); return; }
+    await logAudit('edit_order', clientName($('o-client').value), 'Updated order details');
+    toast('Order updated');
+  } else {
+    const { error } = await sb.from('orders').insert({
+      entity_id: ACTIVE_ENTITY_ID, client_id: $('o-client').value, site_id: $('o-site').value,
+      action: orderActionSel, waste_type: orderWasteSel, target_date: $('o-date').value,
+      original_target_date: $('o-date').value, notes: $('o-notes').value||null, taken_by: CURRENT_USER.name
+    });
+    if(error){ console.error(error); toast('Failed to save order'); return; }
+    await logAudit('create_order', clientName($('o-client').value), `New order taken for ${fmtDate($('o-date').value)}`);
+    toast('Order recorded');
+  }
+  $('orderOverlay').classList.remove('show');
+  await loadOrders(); renderOrders();
+});
+
+// --- Postpone modal ---
+function openPostponeModal(orderId){
+  const o = ORDERS.find(x=>x.id===orderId);
+  if(!o) return;
+  activePostponeOrderId = orderId;
+  $('postponeHint').textContent = `${clientName(o.client_id)} — currently set for ${fmtDate(o.target_date)}${o.postpone_count>0?` (postponed ${o.postpone_count}x already)`:''}.`;
+  const next = new Date(o.target_date+'T00:00:00'); next.setDate(next.getDate()+1);
+  $('p-newdate').value = next.toISOString().slice(0,10);
+  $('postponeOverlay').classList.add('show');
+}
+$('closePostpone').addEventListener('click', () => $('postponeOverlay').classList.remove('show'));
+$('cancelPostpone').addEventListener('click', () => $('postponeOverlay').classList.remove('show'));
+$('savePostpone').addEventListener('click', async () => {
+  const o = ORDERS.find(x=>x.id===activePostponeOrderId);
+  const newDate = $('p-newdate').value;
+  if(!newDate){ toast('Select a new date'); return; }
+  const { error: e1 } = await sb.from('order_postponements').insert({
+    order_id: o.id, entity_id: ACTIVE_ENTITY_ID, old_date: o.target_date, new_date: newDate, postponed_by: CURRENT_USER.name
+  });
+  if(e1){ console.error(e1); toast('Failed to record postponement'); return; }
+  const { error: e2 } = await sb.from('orders').update({ target_date: newDate, postpone_count: (o.postpone_count||0)+1, updated_at: new Date().toISOString() }).eq('id', o.id);
+  if(e2){ console.error(e2); toast('Failed to postpone'); return; }
+  await logAudit('postpone_order', clientName(o.client_id), `Postponed from ${fmtDate(o.target_date)} to ${fmtDate(newDate)}`);
+  toast('Order postponed');
+  $('postponeOverlay').classList.remove('show');
+  await loadOrders(); renderOrders();
+});
+
+// --- Cancel order modal ---
+let cancelReasonSel = null;
+document.querySelectorAll('#co-reason .waste-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#co-reason .waste-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); cancelReasonSel=opt.dataset.v; $('co-other').value=''; }));
+function openCancelOrderModal(orderId){
+  activeCancelOrderId = orderId;
+  cancelReasonSel = null; $('co-other').value = '';
+  document.querySelectorAll('#co-reason .waste-opt').forEach(o=>o.classList.remove('sel'));
+  $('cancelOrderOverlay').classList.add('show');
+}
+$('closeCancelOrder').addEventListener('click', () => $('cancelOrderOverlay').classList.remove('show'));
+$('cancelCancelOrder').addEventListener('click', () => $('cancelOrderOverlay').classList.remove('show'));
+$('saveCancelOrder').addEventListener('click', async () => {
+  const reason = $('co-other').value.trim() || cancelReasonSel;
+  if(!reason){ toast('Select or enter a cancellation reason'); return; }
+  const o = ORDERS.find(x=>x.id===activeCancelOrderId);
+  const { error } = await sb.from('orders').update({
+    status:'cancelled', cancelled_reason: reason, cancelled_by: CURRENT_USER.name, cancelled_at: new Date().toISOString(), updated_at: new Date().toISOString()
+  }).eq('id', o.id);
+  if(error){ console.error(error); toast('Failed to cancel order'); return; }
+  await logAudit('cancel_order', clientName(o.client_id), `Cancelled — ${reason}`);
+  toast('Order cancelled');
+  $('cancelOrderOverlay').classList.remove('show');
+  await loadOrders(); renderOrders();
+});
+
+// --- Assign & Dispatch modal ---
+function openAssignOrderModal(orderId){
+  const o = ORDERS.find(x=>x.id===orderId);
+  if(!o || !canAssignOrder()) return;
+  activeAssignOrderId = orderId;
+  $('assignOrderHint').textContent = `${clientName(o.client_id)} — ${siteName(o.site_id)} — ${o.action==='deploy'?'Bin Out':'Bin In'} (${o.waste_type})`;
+  $('ao-lorry').value=''; $('ao-bin').value=''; $('ao-driver').value='';
+  $('assignOrderOverlay').classList.add('show');
+}
+$('closeAssignOrder').addEventListener('click', () => $('assignOrderOverlay').classList.remove('show'));
+$('cancelAssignOrder').addEventListener('click', () => $('assignOrderOverlay').classList.remove('show'));
+$('ao-lorry').addEventListener('input', () => {
+  const dd = $('ao-lorry-dropdown');
+  const q = $('ao-lorry').value.trim().toLowerCase();
+  const matches = (q ? LORRY_REGISTRY.filter(l=>l.lorry_number.toLowerCase().includes(q)) : LORRY_REGISTRY).slice(0,20);
+  if(matches.length===0){ dd.style.display='none'; return; }
+  dd.innerHTML = matches.map(l=>`<div class="combo-item" data-lorry="${l.lorry_number.replace(/"/g,'&quot;')}">${l.lorry_number}${l.default_driver?` <span style="color:var(--text-dim); font-size:11px;">— ${l.default_driver}</span>`:''}</div>`).join('');
+  dd.style.display='block';
+  dd.querySelectorAll('.combo-item').forEach(item => item.addEventListener('click', () => {
+    $('ao-lorry').value = item.dataset.lorry; dd.style.display='none';
+    const match = LORRY_REGISTRY.find(l=>l.lorry_number===item.dataset.lorry);
+    if(match && match.default_driver && !$('ao-driver').value.trim()) $('ao-driver').value = match.default_driver;
+  }));
+});
+document.addEventListener('click', (e) => { if(!e.target.closest('#ao-lorry') && !e.target.closest('#ao-lorry-dropdown')){ $('ao-lorry-dropdown').style.display='none'; } });
+$('saveAssignOrder').addEventListener('click', async () => {
+  const bin = $('ao-bin').value.trim();
+  if(!bin){ toast('Enter the bin number'); return; }
+  const o = ORDERS.find(x=>x.id===activeAssignOrderId);
+  const tripPayload = {
+    trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id,
+    lorry_number: $('ao-lorry').value||null, bin_number: bin, driver_name: $('ao-driver').value||null,
+    waste_type: o.waste_type, action: o.action, notes: o.notes||null,
+    logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID
+  };
+  const { data: tripData, error: tripErr } = await sb.from('trip_log').insert(tripPayload).select().single();
+  if(tripErr){ console.error(tripErr); toast('Failed to create trip'); return; }
+  const { error: orderErr } = await sb.from('orders').update({ status:'completed', completed_trip_id: tripData.id, updated_at: new Date().toISOString() }).eq('id', o.id);
+  if(orderErr){ console.error(orderErr); toast('Trip created but failed to close order — check console'); return; }
+  await logAudit('dispatch_order', clientName(o.client_id), `Assigned & completed — bin ${bin}, driver ${$('ao-driver').value||'—'}`);
+  toast('Order dispatched and completed');
+  $('assignOrderOverlay').classList.remove('show');
+  await loadOrders(); renderOrders(); await loadAll();
+});
+
+// ===== Warehouse tracking =====
+let filterWhLeakage = 'all';
+let editingWarehouseLocId = null;
+const WAREHOUSE_LEAKAGE_THRESHOLD_DAYS = 14;
+
+async function loadWarehouseData(){
+  const [{data: locs, error: e1}, {data: log, error: e2}] = await Promise.all([
+    sb.from('warehouse_registry').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('warehouse_name'),
+    sb.from('bin_warehouse_log').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('received_date', {ascending:false}).order('created_at', {ascending:false})
+  ]);
+  if(e1||e2){ console.error(e1,e2); return; }
+  WAREHOUSE_LOCATIONS = locs||[]; WAREHOUSE_LOG = log||[];
+}
+function warehouseName(id){ const w = WAREHOUSE_LOCATIONS.find(x=>x.id===id); return w?w.warehouse_name:'—'; }
+
+function latestWarehouseEntryFor(binNumber){
+  const entries = WAREHOUSE_LOG.filter(w=>w.bin_number===binNumber);
+  if(entries.length===0) return null;
+  return entries.reduce((latest,e) => {
+    if(!latest) return e;
+    if(e.received_date > latest.received_date || (e.received_date===latest.received_date && e.created_at>latest.created_at)) return e;
+    return latest;
+  }, null);
+}
+function currentWarehouseBins(){
+  // bins whose most recent event across trips/repairs/warehouse-log is a warehouse receipt
+  const byBin = {};
+  WAREHOUSE_LOG.forEach(w => { const k=w.bin_number; if(!byBin[k] || w.received_date>byBin[k].received_date || (w.received_date===byBin[k].received_date && w.created_at>byBin[k].created_at)) byBin[k]=w; });
+  const repairs = openBinRepairs();
+  return Object.values(byBin).filter(w => {
+    const latestTrip = getLatestTripForBin(w.bin_number, null);
+    const repair = repairs[w.bin_number];
+    if(repair && repair.sent_date >= w.received_date) return false;
+    if(latestTrip && latestTrip.trip_date > w.received_date) return false;
+    return true;
+  });
+}
+
+function renderWarehouse(){
+  $('openNewWarehouseLoc').style.display = (canEdit() || isMaker()) ? 'inline-block' : 'none';
+  $('openReceiveBin').style.display = (canEdit() || isMaker()) ? 'inline-block' : 'none';
+  $('whLeakageChip').style.display = canSeeLeakage() ? 'inline-block' : 'none';
+
+  let bins = currentWarehouseBins();
+  if(filterWhLeakage==='idle') bins = bins.filter(w => daysSince(w.received_date) >= WAREHOUSE_LEAKAGE_THRESHOLD_DAYS);
+  bins.sort((a,b)=>a.bin_number.localeCompare(b.bin_number));
+
+  const body = $('warehouseLogBody');
+  if(bins.length===0){ body.innerHTML = '<tr><td colspan="6"><div class="empty-state">No bins currently in warehouse</div></td></tr>'; }
+  else {
+    body.innerHTML = bins.map(w => {
+      const idle = daysSince(w.received_date) >= WAREHOUSE_LEAKAGE_THRESHOLD_DAYS;
+      const dateCell = idle ? `<span style="color:var(--red); font-weight:600;">⚠ ${fmtDate(w.received_date)} (${daysSince(w.received_date)}d)</span>` : fmtDate(w.received_date);
+      return `
+      <tr>
+        <td>${w.bin_number}</td>
+        <td>${warehouseName(w.warehouse_id)}</td>
+        <td>${dateCell}</td>
+        <td>${w.condition_notes||'—'}</td>
+        <td>${w.logged_by||'—'}</td>
+        <td></td>
+      </tr>`;
+    }).join('');
+  }
+
+  const locBody = $('warehouseLocBody');
+  if(WAREHOUSE_LOCATIONS.length===0){ locBody.innerHTML = '<tr><td colspan="4"><div class="empty-state">No warehouse locations added yet</div></td></tr>'; return; }
+  locBody.innerHTML = WAREHOUSE_LOCATIONS.map(w => `
+    <tr>
+      <td>${w.warehouse_name}</td>
+      <td>${w.address||'—'}</td>
+      <td>${w.notes||'—'}</td>
+      <td>${canEdit() ? `<button class="row-btn edit" data-editwh="${w.id}">Edit</button>` : ''}${canDelete() ? `<button class="row-btn del" data-delwh="${w.id}">Delete</button>` : ''}</td>
+    </tr>`).join('');
+  locBody.querySelectorAll('[data-editwh]').forEach(btn => btn.addEventListener('click', () => openWarehouseLocModal(btn.dataset.editwh)));
+  locBody.querySelectorAll('[data-delwh]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const w = WAREHOUSE_LOCATIONS.find(x=>x.id===btn.dataset.delwh);
+      if(!confirm(`Remove warehouse location "${w.warehouse_name}"?`)) return;
+      const { error } = await sb.from('warehouse_registry').delete().eq('id', w.id);
+      if(error){ console.error(error); toast('Failed to delete'); return; }
+      await logAudit('delete_warehouse_location', w.warehouse_name, 'Removed warehouse location');
+      toast('Location removed');
+      await loadWarehouseData(); renderWarehouse();
+    });
+  });
+}
+document.querySelectorAll('[data-whfilter]').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('[data-whfilter]').forEach(c=>c.classList.remove('active'));
+    chip.classList.add('active');
+    filterWhLeakage = chip.dataset.whfilter;
+    renderWarehouse();
+  });
+});
+
+function openWarehouseLocModal(id){
+  const w = id ? WAREHOUSE_LOCATIONS.find(x=>x.id===id) : null;
+  editingWarehouseLocId = id || null;
+  $('warehouseLocTitle').textContent = w ? 'Edit warehouse location' : 'Add warehouse location';
+  $('wl-name').value = w ? w.warehouse_name : '';
+  $('wl-address').value = w ? (w.address||'') : '';
+  $('wl-notes').value = w ? (w.notes||'') : '';
+  $('warehouseLocOverlay').classList.add('show');
+}
+$('openNewWarehouseLoc').addEventListener('click', () => openWarehouseLocModal(null));
+$('closeWarehouseLoc').addEventListener('click', () => $('warehouseLocOverlay').classList.remove('show'));
+$('cancelWarehouseLoc').addEventListener('click', () => $('warehouseLocOverlay').classList.remove('show'));
+$('saveWarehouseLoc').addEventListener('click', async () => {
+  const name = $('wl-name').value.trim();
+  if(!name){ toast('Enter a warehouse name'); return; }
+  const payload = { warehouse_name: name, address: $('wl-address').value||null, notes: $('wl-notes').value||null };
+  if(editingWarehouseLocId){
+    const { error } = await sb.from('warehouse_registry').update(payload).eq('id', editingWarehouseLocId);
+    if(error){ console.error(error); toast(error.message.includes('duplicate')?'Name already used':'Failed to update'); return; }
+    await logAudit('edit_warehouse_location', name, 'Updated warehouse location');
+    toast('Location updated');
+  } else {
+    const { error } = await sb.from('warehouse_registry').insert({ ...payload, entity_id: ACTIVE_ENTITY_ID });
+    if(error){ console.error(error); toast(error.message.includes('duplicate')?'Name already used':'Failed to add location'); return; }
+    await logAudit('add_warehouse_location', name, 'Added warehouse location');
+    toast('Location added');
+  }
+  $('warehouseLocOverlay').classList.remove('show');
+  await loadWarehouseData(); renderWarehouse();
+});
+
+$('openReceiveBin').addEventListener('click', () => {
+  $('rb-bin').value=''; $('rb-notes').value='';
+  $('rb-date').value = todayISO();
+  $('rb-warehouse').innerHTML = '<option value="">Select warehouse…</option>' + WAREHOUSE_LOCATIONS.map(w=>`<option value="${w.id}">${w.warehouse_name}</option>`).join('');
+  $('receiveBinOverlay').classList.add('show');
+});
+$('closeReceiveBin').addEventListener('click', () => $('receiveBinOverlay').classList.remove('show'));
+$('cancelReceiveBin').addEventListener('click', () => $('receiveBinOverlay').classList.remove('show'));
+$('saveReceiveBin').addEventListener('click', async () => {
+  const bin = $('rb-bin').value.trim();
+  if(!bin){ toast('Enter the bin number'); return; }
+  if(!$('rb-warehouse').value){ toast('Select a warehouse'); return; }
+  if(!$('rb-date').value){ toast('Select the received date'); return; }
+  const { error } = await sb.from('bin_warehouse_log').insert({
+    entity_id: ACTIVE_ENTITY_ID, bin_number: bin, warehouse_id: $('rb-warehouse').value,
+    received_date: $('rb-date').value, condition_notes: $('rb-notes').value||null, logged_by: CURRENT_USER.name
+  });
+  if(error){ console.error(error); toast('Failed to save — check console'); return; }
+  await logAudit('receive_warehouse_bin', bin, `Received into ${warehouseName($('rb-warehouse').value)}`);
+  toast('Bin received into warehouse');
+  $('receiveBinOverlay').classList.remove('show');
+  await loadWarehouseData(); renderWarehouse();
+  if($('view-bins').classList.contains('active')) renderBins();
+});
+
 // ===== Bin Registry (master list) =====
 let BIN_REGISTRY = [];
 let newBinWaste = null;
@@ -2316,25 +2928,36 @@ function renderAlertsWidget(){
     const days = lastOrder ? daysSince(lastOrder) : daysSince((c.created_at||'').slice(0,10));
     return days >= CUSTOMER_LEAKAGE_THRESHOLD_DAYS;
   }).length;
+  const overdueOrdersCount = ORDERS.filter(o => orderIsOverdue(o)).length;
+  const idleWarehouseCount = currentWarehouseBins().filter(w => daysSince(w.received_date) >= WAREHOUSE_LEAKAGE_THRESHOLD_DAYS).length;
 
-  if(leakingCount===0 && overdueRepairs===0 && unreviewedCount===0 && inactiveCustCount===0){
-    wrap.innerHTML = `<div class="alerts-widget"><div class="alert-card ok"><div class="an">✓</div><div class="al">No leakage, overdue repairs, inactive customers, or unreviewed trips</div></div></div>`;
+  if(leakingCount===0 && overdueRepairs===0 && unreviewedCount===0 && inactiveCustCount===0 && overdueOrdersCount===0 && idleWarehouseCount===0){
+    wrap.innerHTML = `<div class="alerts-widget"><div class="alert-card ok"><div class="an">✓</div><div class="al">No leakage, overdue items, or unreviewed trips</div></div></div>`;
     wrap.style.display='block';
     return;
   }
   wrap.innerHTML = `<div class="alerts-widget">
+    <div class="alert-card ${overdueOrdersCount===0?'ok':''}" id="alertOrders"><div class="an">${overdueOrdersCount}</div><div class="al">Orders overdue (2+ days)</div></div>
     <div class="alert-card ${leakingCount===0?'ok':''}" id="alertLeaking"><div class="an">${leakingCount}</div><div class="al">Bins leaking (7+ days out)</div></div>
     <div class="alert-card ${overdueRepairs===0?'ok':''}" id="alertRepairs"><div class="an">${overdueRepairs}</div><div class="al">Repairs overdue (14+ days)</div></div>
+    <div class="alert-card ${idleWarehouseCount===0?'ok':''}" id="alertWarehouse"><div class="an">${idleWarehouseCount}</div><div class="al">Bins idle in warehouse (14+ days)</div></div>
     <div class="alert-card ${inactiveCustCount===0?'ok':''}" id="alertInactiveCust"><div class="an">${inactiveCustCount}</div><div class="al">Customers with no orders (7+ days)</div></div>
     <div class="alert-card ${unreviewedCount===0?'ok':''}" id="alertUnreviewed"><div class="an">${unreviewedCount}</div><div class="al">Trips not yet reviewed</div></div>
     <span class="alerts-dismiss" id="alertsDismiss">Dismiss for today</span>
   </div>`;
   wrap.style.display='block';
+  $('alertOrders').addEventListener('click', () => {
+    document.querySelector('.tab[data-view="orders"]').click();
+  });
   $('alertLeaking').addEventListener('click', () => {
     document.querySelector('.tab[data-view="bins"]').click();
     setTimeout(() => document.querySelector('[data-binstatus="leakage"]')?.click(), 50);
   });
   $('alertRepairs').addEventListener('click', () => document.querySelector('.tab[data-view="maintenance"]').click());
+  $('alertWarehouse').addEventListener('click', () => {
+    document.querySelector('.tab[data-view="warehouse"]').click();
+    setTimeout(() => document.querySelector('[data-whfilter="idle"]')?.click(), 50);
+  });
   $('alertInactiveCust').addEventListener('click', () => {
     document.querySelector('.tab[data-view="customers"]').click();
     setTimeout(() => document.querySelector('[data-custfilter="inactive"]')?.click(), 50);
@@ -3015,7 +3638,7 @@ $('saveTrip').addEventListener('click', async () => {
   await loadAll();
 });
 
-[$('tripOverlay'), $('newStaffOverlay'), $('customerOverlay'), $('customerSitesOverlay'), $('customerTraceOverlay'), $('maintenanceOverlay'), $('binRegistryOverlay'), $('lorryRegistryOverlay'), $('importExcelOverlay')].forEach(ov => ov.addEventListener('click', (e) => { if(e.target===ov) ov.classList.remove('show'); }));
+[$('tripOverlay'), $('newStaffOverlay'), $('customerOverlay'), $('customerSitesOverlay'), $('customerTraceOverlay'), $('maintenanceOverlay'), $('binRegistryOverlay'), $('lorryRegistryOverlay'), $('importExcelOverlay'), $('orderOverlay'), $('assignOrderOverlay'), $('postponeOverlay'), $('cancelOrderOverlay'), $('warehouseLocOverlay'), $('receiveBinOverlay')].forEach(ov => ov.addEventListener('click', (e) => { if(e.target===ov) ov.classList.remove('show'); }));
 </script>
 </body>
 </html>
