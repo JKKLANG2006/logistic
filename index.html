@@ -732,10 +732,13 @@
     <h2 id="orderModalTitle">New order</h2>
     <div class="hint">Record a customer's request before a driver/bin is assigned.</div>
     <div class="field"><label>Action</label>
-      <div class="action-grid" id="o-action">
+      <div class="action-grid" id="o-action" style="grid-template-columns:1fr 1fr 1fr;">
         <div class="action-opt" data-v="deploy">Bin Out</div>
         <div class="action-opt" data-v="collect">Bin In</div>
+        <div class="action-opt" data-v="exchange">Exchange</div>
       </div>
+      <div class="hint" id="o-exchange-hint" style="display:none; margin-top:6px;">Driver swaps the full bin for an empty one in the same visit.</div>
+    </div>
     </div>
     <div class="field"><label>Target date</label><input type="date" id="o-date"></div>
     <div class="field" style="position:relative;"><label>Customer</label>
@@ -770,7 +773,8 @@
       <input type="text" id="ao-lorry" placeholder="e.g. WXY 1234" autocomplete="off">
       <div id="ao-lorry-dropdown" class="combo-dropdown" style="display:none;"></div>
     </div>
-    <div class="field"><label>Bin number</label><input type="text" id="ao-bin" placeholder="e.g. RR-014"></div>
+    <div class="field" id="ao-bin-field"><label id="ao-bin-label">Bin number</label><input type="text" id="ao-bin" placeholder="e.g. RR-014"></div>
+    <div class="field" id="ao-newbin-field" style="display:none;"><label>New empty bin number (going out)</label><input type="text" id="ao-newbin" placeholder="e.g. 88"></div>
     <div class="field"><label>Driver name</label><input type="text" id="ao-driver" placeholder="Driver name"></div>
     <div class="modal-actions">
       <button class="btn-cancel" id="cancelAssignOrder">Cancel</button>
@@ -2323,7 +2327,7 @@ function renderOrders(){
       <td>${fmtDateTime(o.created_at)}</td>
       <td>${clientName(o.client_id)}</td>
       <td>${siteName(o.site_id)}</td>
-      <td><span class="pill ${o.action}">${o.action==='deploy'?'Bin Out':'Bin In'}</span>${o.linked_trip_id ? `<div style="font-size:10px; color:var(--text-dim); margin-top:2px;">🔗 ${(TRIPS.find(t=>t.id===o.linked_trip_id)||{}).bin_number||'—'}</div>` : ''}</td>
+      <td><span class="pill ${o.action==='exchange'?'':o.action}" style="${o.action==='exchange'?'color:var(--violet); background:rgba(139,127,209,0.15);':''}">${o.action==='deploy'?'Bin Out':o.action==='collect'?'Bin In':'Exchange'}</span>${o.linked_trip_id ? `<div style="font-size:10px; color:var(--text-dim); margin-top:2px;">🔗 ${(TRIPS.find(t=>t.id===o.linked_trip_id)||{}).bin_number||'—'}</div>` : ''}</td>
       <td><span class="waste-dot ${o.waste_type}"></span>${o.waste_type}</td>
       <td>${o.postpone_count>0 ? `${o.postpone_count}x` : '—'}</td>
       <td>${o.notes||'—'}</td>
@@ -2388,8 +2392,10 @@ function binsCurrentlyAtSite(siteId){
   return Object.values(byBin).filter(t=>t.action==='deploy');
 }
 function refreshOrderLinkBinField(){
-  const showLinkBin = orderActionSel === 'collect';
+  const showLinkBin = orderActionSel === 'collect' || orderActionSel === 'exchange';
   $('o-linkbin-field').style.display = showLinkBin ? 'block' : 'none';
+  $('o-exchange-hint').style.display = orderActionSel === 'exchange' ? 'block' : 'none';
+  document.querySelector('#o-linkbin-field label').textContent = orderActionSel === 'exchange' ? 'Which full bin is being swapped out?' : 'Which bin is being collected?';
   if(!showLinkBin){ $('o-linkbin').value=''; return; }
   const siteId = $('o-site').value;
   const bins = binsCurrentlyAtSite(siteId);
@@ -2455,7 +2461,7 @@ $('saveOrder').addEventListener('click', async () => {
   if(!$('o-client').value){ toast('Select a customer'); return; }
   if(!$('o-site').value){ toast('Select a site'); return; }
   if(!$('o-date').value){ toast('Select a target date'); return; }
-  const linkedTripId = orderActionSel==='collect' ? ($('o-linkbin').value || null) : null;
+  const linkedTripId = (orderActionSel==='collect' || orderActionSel==='exchange') ? ($('o-linkbin').value || null) : null;
 
   if(editingOrderId){
     const { error } = await sb.from('orders').update({
@@ -2538,10 +2544,22 @@ function openAssignOrderModal(orderId){
   const o = ORDERS.find(x=>x.id===orderId);
   if(!o || !canAssignOrder()) return;
   activeAssignOrderId = orderId;
-  $('assignOrderHint').textContent = `${clientName(o.client_id)} — ${siteName(o.site_id)} — ${o.action==='deploy'?'Bin Out':'Bin In'} (${o.waste_type})`;
-  $('ao-lorry').value=''; $('ao-driver').value='';
+  const actionLabel = o.action==='deploy' ? 'Bin Out' : o.action==='collect' ? 'Bin In' : 'Exchange';
+  $('assignOrderHint').textContent = `${clientName(o.client_id)} — ${siteName(o.site_id)} — ${actionLabel} (${o.waste_type})`;
+  $('ao-lorry').value=''; $('ao-driver').value=''; $('ao-newbin').value='';
   const linkedTrip = o.linked_trip_id ? TRIPS.find(t=>t.id===o.linked_trip_id) : null;
-  $('ao-bin').value = linkedTrip ? linkedTrip.bin_number : '';
+
+  if(o.action==='exchange'){
+    $('ao-bin-label').textContent = 'Full bin being returned';
+    $('ao-bin').value = linkedTrip ? linkedTrip.bin_number : '';
+    $('ao-bin').readOnly = true;
+    $('ao-newbin-field').style.display = 'block';
+  } else {
+    $('ao-bin-label').textContent = 'Bin number';
+    $('ao-bin').value = linkedTrip ? linkedTrip.bin_number : '';
+    $('ao-bin').readOnly = false;
+    $('ao-newbin-field').style.display = 'none';
+  }
   $('assignOrderOverlay').classList.add('show');
 }
 $('closeAssignOrder').addEventListener('click', () => $('assignOrderOverlay').classList.remove('show'));
@@ -2561,21 +2579,36 @@ $('ao-lorry').addEventListener('input', () => {
 });
 document.addEventListener('click', (e) => { if(!e.target.closest('#ao-lorry') && !e.target.closest('#ao-lorry-dropdown')){ $('ao-lorry-dropdown').style.display='none'; } });
 $('saveAssignOrder').addEventListener('click', async () => {
-  const bin = $('ao-bin').value.trim();
-  if(!bin){ toast('Enter the bin number'); return; }
   const o = ORDERS.find(x=>x.id===activeAssignOrderId);
-  const tripPayload = {
-    trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id,
-    lorry_number: $('ao-lorry').value||null, bin_number: bin, driver_name: $('ao-driver').value||null,
-    waste_type: o.waste_type, action: o.action, notes: o.notes||null,
-    logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID
-  };
-  const { data: tripData, error: tripErr } = await sb.from('trip_log').insert(tripPayload).select().single();
-  if(tripErr){ console.error(tripErr); toast('Failed to create trip'); return; }
-  const { error: orderErr } = await sb.from('orders').update({ status:'completed', completed_trip_id: tripData.id, updated_at: new Date().toISOString() }).eq('id', o.id);
-  if(orderErr){ console.error(orderErr); toast('Trip created but failed to close order — check console'); return; }
-  await logAudit('dispatch_order', clientName(o.client_id), `Assigned & completed — bin ${bin}, driver ${$('ao-driver').value||'—'}`);
-  toast('Order dispatched and completed');
+  const lorry = $('ao-lorry').value||null;
+  const driver = $('ao-driver').value||null;
+
+  if(o.action==='exchange'){
+    const oldBin = $('ao-bin').value.trim();
+    const newBin = $('ao-newbin').value.trim();
+    if(!oldBin){ toast('Missing the returning bin number'); return; }
+    if(!newBin){ toast('Enter the new empty bin number going out'); return; }
+    const collectPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: oldBin, driver_name: driver, waste_type: o.waste_type, action: 'collect', notes: o.notes||null, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
+    const deployPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: newBin, driver_name: driver, waste_type: o.waste_type, action: 'deploy', notes: o.notes||null, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
+    const { data: collectData, error: e1 } = await sb.from('trip_log').insert(collectPayload).select().single();
+    if(e1){ console.error(e1); toast('Failed to log the returning bin — check console'); return; }
+    const { data: deployData, error: e2 } = await sb.from('trip_log').insert(deployPayload).select().single();
+    if(e2){ console.error(e2); toast('Returning bin logged, but new bin failed — check console and complete manually'); return; }
+    const { error: orderErr } = await sb.from('orders').update({ status:'completed', completed_trip_id: deployData.id, updated_at: new Date().toISOString() }).eq('id', o.id);
+    if(orderErr){ console.error(orderErr); toast('Trips created but failed to close order — check console'); return; }
+    await logAudit('dispatch_order_exchange', clientName(o.client_id), `Exchanged bin ${oldBin} → ${newBin}, driver ${driver||'—'}`);
+    toast('Exchange dispatched and completed');
+  } else {
+    const bin = $('ao-bin').value.trim();
+    if(!bin){ toast('Enter the bin number'); return; }
+    const tripPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: bin, driver_name: driver, waste_type: o.waste_type, action: o.action, notes: o.notes||null, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
+    const { data: tripData, error: tripErr } = await sb.from('trip_log').insert(tripPayload).select().single();
+    if(tripErr){ console.error(tripErr); toast('Failed to create trip'); return; }
+    const { error: orderErr } = await sb.from('orders').update({ status:'completed', completed_trip_id: tripData.id, updated_at: new Date().toISOString() }).eq('id', o.id);
+    if(orderErr){ console.error(orderErr); toast('Trip created but failed to close order — check console'); return; }
+    await logAudit('dispatch_order', clientName(o.client_id), `Assigned & completed — bin ${bin}, driver ${driver||'—'}`);
+    toast('Order dispatched and completed');
+  }
   $('assignOrderOverlay').classList.remove('show');
   await loadOrders(); renderOrders(); await loadAll();
 });
