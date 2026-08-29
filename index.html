@@ -772,8 +772,8 @@
       <input type="text" id="ao-lorry" placeholder="e.g. WXY 1234" autocomplete="off">
       <div id="ao-lorry-dropdown" class="combo-dropdown" style="display:none;"></div>
     </div>
-    <div class="field" id="ao-bin-field"><label id="ao-bin-label">Bin number</label><input type="text" id="ao-bin" placeholder="e.g. RR-014"></div>
-    <div class="field" id="ao-newbin-field" style="display:none;"><label>New empty bin number (going out)</label><input type="text" id="ao-newbin" placeholder="e.g. 88"></div>
+    <div class="field" id="ao-bin-field"><label id="ao-bin-label">Bin number</label><input type="text" id="ao-bin" placeholder="e.g. RR-014"><div id="ao-bin-hint" style="display:none; font-size:11px; margin-top:5px;"></div></div>
+    <div class="field" id="ao-newbin-field" style="display:none;"><label>New empty bin number (going out)</label><input type="text" id="ao-newbin" placeholder="e.g. 88"><div id="ao-newbin-hint" style="display:none; font-size:11px; margin-top:5px;"></div></div>
     <div class="field"><label>Driver name</label><input type="text" id="ao-driver" placeholder="Driver name"></div>
     <div class="field"><label>Photo (optional)</label><input type="file" id="ao-photo" accept="image/*"></div>
     <div class="modal-actions">
@@ -2540,6 +2540,40 @@ $('saveCancelOrder').addEventListener('click', async () => {
 });
 
 // --- Assign & Dispatch modal ---
+function assignBinHint(inputId, hintId, expectedAction, excludeTripId){
+  const hint = $(hintId);
+  const val = $(inputId).value.trim();
+  if(!val){ hint.style.display='none'; return; }
+  const latest = getLatestTripForBin(val, excludeTripId);
+  if(!latest){ hint.style.display='none'; return; }
+  const site = siteName(latest.site_id), client = clientName(latest.client_id);
+  hint.style.display='block';
+  if(expectedAction === 'deploy'){
+    if(latest.action === 'deploy'){
+      hint.style.color = 'var(--red)';
+      hint.textContent = `⚠ Already Bin Out at ${client} — ${site} (${fmtDate(latest.trip_date)}) — collect it first`;
+    } else {
+      hint.style.color = 'var(--sage)';
+      hint.textContent = `✓ Last Bin In on ${fmtDate(latest.trip_date)} — available for Bin Out`;
+    }
+  } else {
+    if(latest.action === 'deploy'){
+      hint.style.color = 'var(--sage)';
+      hint.textContent = `✓ Currently Bin Out at ${client} — ${site} (${fmtDate(latest.trip_date)}) — ready to collect`;
+    } else {
+      hint.style.color = 'var(--red)';
+      hint.textContent = `⚠ Already Bin In since ${fmtDate(latest.trip_date)} — not currently out anywhere`;
+    }
+  }
+}
+$('ao-bin').addEventListener('input', () => {
+  const o = ORDERS.find(x=>x.id===activeAssignOrderId);
+  if(!o) return;
+  const expected = o.action==='exchange' ? 'collect' : o.action;
+  assignBinHint('ao-bin', 'ao-bin-hint', expected, null);
+});
+$('ao-newbin').addEventListener('input', () => assignBinHint('ao-newbin', 'ao-newbin-hint', 'deploy', null));
+
 function openAssignOrderModal(orderId){
   const o = ORDERS.find(x=>x.id===orderId);
   if(!o || !canAssignOrder()) return;
@@ -2560,6 +2594,9 @@ function openAssignOrderModal(orderId){
     $('ao-bin').readOnly = false;
     $('ao-newbin-field').style.display = 'none';
   }
+  $('ao-bin-hint').style.display='none'; $('ao-newbin-hint').style.display='none';
+  const expected = o.action==='exchange' ? 'collect' : o.action;
+  assignBinHint('ao-bin', 'ao-bin-hint', expected, null);
   $('assignOrderOverlay').classList.add('show');
 }
 $('closeAssignOrder').addEventListener('click', () => $('assignOrderOverlay').classList.remove('show'));
@@ -2597,6 +2634,13 @@ $('saveAssignOrder').addEventListener('click', async () => {
     const newBin = $('ao-newbin').value.trim();
     if(!oldBin){ toast('Missing the returning bin number'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
     if(!newBin){ toast('Enter the new empty bin number going out'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+    const newBinLatest = getLatestTripForBin(newBin, null);
+    if(newBinLatest && newBinLatest.action === 'deploy'){
+      const site = siteName(newBinLatest.site_id), client = clientName(newBinLatest.client_id);
+      const ok = confirm(`Bin ${newBin} is already marked Bin Out at ${client} — ${site} and hasn't been collected yet.\n\nThis bin can't be at two places at once. Deploy it here anyway?`);
+      if(!ok){ saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+      await logAudit('bin_out_conflict_override', newBin, `Exchange-deployed while already out at ${client} — ${site}`);
+    }
     const collectPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: oldBin, driver_name: driver, waste_type: o.waste_type, action: 'collect', notes: o.notes||null, photo_url: photoUrl, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
     const deployPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: newBin, driver_name: driver, waste_type: o.waste_type, action: 'deploy', notes: o.notes||null, photo_url: photoUrl, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
     const { data: collectData, error: e1 } = await sb.from('trip_log').insert(collectPayload).select().single();
@@ -2610,6 +2654,20 @@ $('saveAssignOrder').addEventListener('click', async () => {
   } else {
     const bin = $('ao-bin').value.trim();
     if(!bin){ toast('Enter the bin number'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+    const latest = getLatestTripForBin(bin, null);
+    if(latest){
+      if(o.action === 'deploy' && latest.action === 'deploy'){
+        const site = siteName(latest.site_id), client = clientName(latest.client_id);
+        const ok = confirm(`Bin ${bin} is already marked Bin Out at ${client} — ${site} and hasn't been logged as Bin In yet.\n\nThis bin should be collected before being deployed again. Dispatch anyway?`);
+        if(!ok){ saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+        await logAudit('bin_out_conflict_override', bin, `Dispatched Bin Out while already out at ${client} — ${site}`);
+      }
+      if(o.action === 'collect' && latest.action === 'collect'){
+        const ok = confirm(`Bin ${bin} is already marked Bin In and isn't currently deployed anywhere.\n\nDispatch anyway?`);
+        if(!ok){ saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+        await logAudit('bin_in_conflict_override', bin, `Dispatched Bin In while bin was already in`);
+      }
+    }
     const tripPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: bin, driver_name: driver, waste_type: o.waste_type, action: o.action, notes: o.notes||null, photo_url: photoUrl, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
     const { data: tripData, error: tripErr } = await sb.from('trip_log').insert(tripPayload).select().single();
     if(tripErr){ console.error(tripErr); toast('Failed to create trip'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
