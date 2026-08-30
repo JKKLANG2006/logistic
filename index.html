@@ -1972,6 +1972,8 @@ document.querySelectorAll('#s-role .role-opt').forEach(opt => {
   });
 });
 $('saveNewStaff').addEventListener('click', async () => {
+  const btn = $('saveNewStaff'); if(btn.disabled) return; btn.disabled = true;
+  try {
   const name = $('s-name').value.trim(), username = $('s-username').value.trim(), password = $('s-password').value;
   if(!name||!username){ toast('Fill in name and username'); return; }
   if(username.toLowerCase()==='admin'){ toast('"admin" is reserved for master admin login'); return; }
@@ -1994,6 +1996,8 @@ $('saveNewStaff').addEventListener('click', async () => {
   }
   $('newStaffOverlay').classList.remove('show');
   renderStaff();
+
+  } finally { btn.disabled = false; }
 });
 
 // ===== Customers (full detail management, master admin + checker) =====
@@ -2131,6 +2135,8 @@ $('openNewCustomer').addEventListener('click', () => openCustomerModal(null));
 $('closeCustomer').addEventListener('click', () => $('customerOverlay').classList.remove('show'));
 $('cancelCustomer').addEventListener('click', () => $('customerOverlay').classList.remove('show'));
 $('saveCustomer').addEventListener('click', async () => {
+  const btn = $('saveCustomer'); if(btn.disabled) return; btn.disabled = true;
+  try {
   const name = $('c-name').value.trim();
   if(!name){ toast('Customer name is required'); return; }
   const payload = { name, contact_name: $('c-contact').value || null, contact_phone: $('c-phone').value || null };
@@ -2151,6 +2157,8 @@ $('saveCustomer').addEventListener('click', async () => {
   }
   $('customerOverlay').classList.remove('show');
   renderCustomers();
+
+  } finally { btn.disabled = false; }
 });
 
 // ===== Customer Branches (sites) management =====
@@ -2597,6 +2605,8 @@ function openOrderModal(orderId){
 $('closeOrder').addEventListener('click', () => $('orderOverlay').classList.remove('show'));
 $('cancelOrder').addEventListener('click', () => $('orderOverlay').classList.remove('show'));
 $('saveOrder').addEventListener('click', async () => {
+  const btn = $('saveOrder'); if(btn.disabled) return; btn.disabled = true;
+  try {
   if(!orderActionSel){ toast('Select Bin Out or Bin In'); return; }
   if(!orderWasteSel){ toast('Select waste type'); return; }
   if(!$('o-client').value){ toast('Select a customer'); return; }
@@ -2625,6 +2635,8 @@ $('saveOrder').addEventListener('click', async () => {
   }
   $('orderOverlay').classList.remove('show');
   await loadOrders(); renderOrders();
+
+  } finally { btn.disabled = false; }
 });
 
 // --- Postpone modal ---
@@ -2640,6 +2652,8 @@ function openPostponeModal(orderId){
 $('closePostpone').addEventListener('click', () => $('postponeOverlay').classList.remove('show'));
 $('cancelPostpone').addEventListener('click', () => $('postponeOverlay').classList.remove('show'));
 $('savePostpone').addEventListener('click', async () => {
+  const btn = $('savePostpone'); if(btn.disabled) return; btn.disabled = true;
+  try {
   const o = ORDERS.find(x=>x.id===activePostponeOrderId);
   const newDate = $('p-newdate').value;
   if(!newDate){ toast('Select a new date'); return; }
@@ -2653,6 +2667,8 @@ $('savePostpone').addEventListener('click', async () => {
   toast('Order postponed');
   $('postponeOverlay').classList.remove('show');
   await loadOrders(); renderOrders();
+
+  } finally { btn.disabled = false; }
 });
 
 // --- Cancel order modal ---
@@ -2667,6 +2683,8 @@ function openCancelOrderModal(orderId){
 $('closeCancelOrder').addEventListener('click', () => $('cancelOrderOverlay').classList.remove('show'));
 $('cancelCancelOrder').addEventListener('click', () => $('cancelOrderOverlay').classList.remove('show'));
 $('saveCancelOrder').addEventListener('click', async () => {
+  const btn = $('saveCancelOrder'); if(btn.disabled) return; btn.disabled = true;
+  try {
   const reason = $('co-other').value.trim() || cancelReasonSel;
   if(!reason){ toast('Select or enter a cancellation reason'); return; }
   const o = ORDERS.find(x=>x.id===activeCancelOrderId);
@@ -2678,6 +2696,8 @@ $('saveCancelOrder').addEventListener('click', async () => {
   toast('Order cancelled');
   $('cancelOrderOverlay').classList.remove('show');
   await loadOrders(); renderOrders();
+
+  } finally { btn.disabled = false; }
 });
 
 // --- Assign & Dispatch modal ---
@@ -2944,6 +2964,8 @@ $('openNewWarehouseLoc').addEventListener('click', () => openWarehouseLocModal(n
 $('closeWarehouseLoc').addEventListener('click', () => $('warehouseLocOverlay').classList.remove('show'));
 $('cancelWarehouseLoc').addEventListener('click', () => $('warehouseLocOverlay').classList.remove('show'));
 $('saveWarehouseLoc').addEventListener('click', async () => {
+  const btn = $('saveWarehouseLoc'); if(btn.disabled) return; btn.disabled = true;
+  try {
   const name = $('wl-name').value.trim();
   if(!name){ toast('Enter a warehouse name'); return; }
   const payload = { warehouse_name: name, address: $('wl-address').value||null, notes: $('wl-notes').value||null };
@@ -2960,6 +2982,8 @@ $('saveWarehouseLoc').addEventListener('click', async () => {
   }
   $('warehouseLocOverlay').classList.remove('show');
   await loadWarehouseData(); renderWarehouse();
+
+  } finally { btn.disabled = false; }
 });
 
 let editingWarehouseLogId = null;
@@ -2988,6 +3012,8 @@ function openEditWarehouseLogModal(id){
 $('closeReceiveBin').addEventListener('click', () => $('receiveBinOverlay').classList.remove('show'));
 $('cancelReceiveBin').addEventListener('click', () => $('receiveBinOverlay').classList.remove('show'));
 $('saveReceiveBin').addEventListener('click', async () => {
+  const btn = $('saveReceiveBin'); if(btn.disabled) return; btn.disabled = true;
+  try {
   const bin = $('rb-bin').value.trim();
   if(!bin){ toast('Enter the bin number'); return; }
   if(!$('rb-warehouse').value){ toast('Select a warehouse'); return; }
@@ -3008,6 +3034,8 @@ $('saveReceiveBin').addEventListener('click', async () => {
   $('receiveBinOverlay').classList.remove('show');
   await loadWarehouseData(); renderWarehouse();
   if($('view-bins').classList.contains('active')) renderBins();
+
+  } finally { btn.disabled = false; }
 });
 
 // ===== Bin Registry (master list) =====
@@ -3077,6 +3105,8 @@ $('openNewBin').addEventListener('click', () => openBinRegistryModal(null));
 $('closeBinRegistry').addEventListener('click', () => $('binRegistryOverlay').classList.remove('show'));
 $('cancelBinRegistry').addEventListener('click', () => $('binRegistryOverlay').classList.remove('show'));
 $('saveBinRegistry').addEventListener('click', async () => {
+  const btn = $('saveBinRegistry'); if(btn.disabled) return; btn.disabled = true;
+  try {
   const binNumber = $('br-bin').value.trim();
   if(!binNumber){ toast('Enter the bin number'); return; }
 
@@ -3097,6 +3127,8 @@ $('saveBinRegistry').addEventListener('click', async () => {
   }
   $('binRegistryOverlay').classList.remove('show');
   await loadBinRegistry(); renderBinRegistry();
+
+  } finally { btn.disabled = false; }
 });
 
 // ===== Lorry Registry (master list) =====
@@ -3144,6 +3176,8 @@ $('openNewLorry').addEventListener('click', () => openLorryRegistryModal(null));
 $('closeLorryRegistry').addEventListener('click', () => $('lorryRegistryOverlay').classList.remove('show'));
 $('cancelLorryRegistry').addEventListener('click', () => $('lorryRegistryOverlay').classList.remove('show'));
 $('saveLorryRegistry').addEventListener('click', async () => {
+  const btn = $('saveLorryRegistry'); if(btn.disabled) return; btn.disabled = true;
+  try {
   const lorryNumber = $('lr-number').value.trim();
   if(!lorryNumber){ toast('Enter the lorry number'); return; }
   const dupe = LORRY_REGISTRY.find(l => l.lorry_number.toLowerCase()===lorryNumber.toLowerCase() && l.id !== editingLorryRegistryId);
@@ -3162,6 +3196,8 @@ $('saveLorryRegistry').addEventListener('click', async () => {
   }
   $('lorryRegistryOverlay').classList.remove('show');
   await loadLorryRegistry(); renderLorryRegistry();
+
+  } finally { btn.disabled = false; }
 });
 
 // ===== Insights dashboard =====
@@ -3438,6 +3474,8 @@ $('openNewMaintenance').addEventListener('click', () => openMaintenanceModal(nul
 $('closeMaintenance').addEventListener('click', () => $('maintenanceOverlay').classList.remove('show'));
 $('cancelMaintenance').addEventListener('click', () => $('maintenanceOverlay').classList.remove('show'));
 $('saveMaintenance').addEventListener('click', async () => {
+  const btn = $('saveMaintenance'); if(btn.disabled) return; btn.disabled = true;
+  try {
   const bin = $('m-bin').value.trim(), workshop = $('m-workshop').value.trim(), sentDate = $('m-sent-date').value;
   if(!bin){ toast('Enter the bin number'); return; }
   if(!workshop){ toast('Enter the workshop / maintenance hub'); return; }
@@ -3465,6 +3503,8 @@ $('saveMaintenance').addEventListener('click', async () => {
   $('maintenanceOverlay').classList.remove('show');
   await loadMaintenance(); renderMaintenance();
   if($('view-bins').classList.contains('active')) renderBins();
+
+  } finally { btn.disabled = false; }
 });
 
 // ===== Photo capture/upload =====
@@ -3772,6 +3812,8 @@ $('editClientToggle').addEventListener('click', () => {
   panel.style.display = opening ? 'block' : 'none';
 });
 $('saveClientEdit').addEventListener('click', async () => {
+  const btn = $('saveClientEdit'); if(btn.disabled) return; btn.disabled = true;
+  try {
   const clientId = $('f-client').value;
   const name = $('ce-name').value.trim();
   if(!name){ toast('Customer name cannot be empty'); return; }
@@ -3784,6 +3826,8 @@ $('saveClientEdit').addEventListener('click', async () => {
   await logAudit('edit_customer', name, 'Updated customer contact details');
   toast('Customer details updated');
   $('clientEditPanel').style.display = 'none';
+
+  } finally { btn.disabled = false; }
 });
 $('f-site').addEventListener('change', () => { setNewSiteVisible($('f-site').value==='__new__'); });
 document.querySelectorAll('#f-waste .waste-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#f-waste .waste-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); newWasteSelection=opt.dataset.v; }));
@@ -3935,6 +3979,8 @@ document.addEventListener('click', (e) => {
 });
 
 $('saveTrip').addEventListener('click', async () => {
+  const btn = $('saveTrip'); if(btn.disabled) return; btn.disabled = true;
+  try {
   if(!newActionSelection){ toast('Select deploy or collect'); return; }
   if(!$('f-date').value){ toast('Select a trip date'); return; }
   if(!$('f-bin').value.trim()){ toast('Enter the bin number'); return; }
@@ -4014,6 +4060,8 @@ $('saveTrip').addEventListener('click', async () => {
   $('saveTrip').textContent = editingTripId ? 'Save changes' : 'Log trip';
   $('tripOverlay').classList.remove('show');
   await loadAll();
+
+  } finally { btn.disabled = false; }
 });
 
 [$('tripOverlay'), $('newStaffOverlay'), $('customerOverlay'), $('customerSitesOverlay'), $('customerTraceOverlay'), $('maintenanceOverlay'), $('binRegistryOverlay'), $('lorryRegistryOverlay'), $('importExcelOverlay'), $('orderOverlay'), $('assignOrderOverlay'), $('postponeOverlay'), $('cancelOrderOverlay'), $('warehouseLocOverlay'), $('receiveBinOverlay')].forEach(ov => ov.addEventListener('click', (e) => { if(e.target===ov) ov.classList.remove('show'); }));
