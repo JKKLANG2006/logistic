@@ -2614,6 +2614,15 @@ $('saveOrder').addEventListener('click', async () => {
   if(!$('o-date').value){ toast('Select a target date'); return; }
   const linkedTripId = (orderActionSel==='collect' || orderActionSel==='exchange') ? ($('o-linkbin').value || null) : null;
 
+  if(!editingOrderId && linkedTripId){
+    const existing = ORDERS.find(o => o.status==='pending' && o.linked_trip_id===linkedTripId);
+    if(existing){
+      const binNum = (TRIPS.find(t=>t.id===linkedTripId)||{}).bin_number || 'this bin';
+      const ok = confirm(`There's already a pending order to collect ${binNum} — taken by ${existing.taken_by||'someone'} on ${fmtDateTime(existing.created_at)}.\n\nCreate another order for the same bin anyway?`);
+      if(!ok){ return; }
+    }
+  }
+
   if(editingOrderId){
     const { error } = await sb.from('orders').update({
       client_id: $('o-client').value, site_id: $('o-site').value, action: orderActionSel, waste_type: orderWasteSel,
