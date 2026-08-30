@@ -11,6 +11,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   :root{
     --bg: #F3F1EC; --panel: #FFFFFF; --panel-2: #F5F2EC; --border: #E1DBCF;
@@ -471,6 +472,21 @@
       <button class="btn-ghost" id="exportAuditPdf">Export PDF</button>
     </div>
     <div id="storageStatsWidget" class="role-note" style="display:none;"></div>
+    <div class="table-wrap" id="photoBackupPanel" style="display:none; padding:16px; margin-bottom:16px;">
+      <h3 style="font-size:13px; margin-bottom:10px;">📷 Download trip photos (backup)</h3>
+      <div class="hint" style="margin-bottom:12px;">Photos aren't included in Supabase's database backups — download them separately here, scoped by date range so it stays light on your browser.</div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px;">
+        <div><label style="font-size:11px; color:var(--text-dim); display:block; margin-bottom:4px;">From</label><input type="date" id="pb-date-from"></div>
+        <div><label style="font-size:11px; color:var(--text-dim); display:block; margin-bottom:4px;">To</label><input type="date" id="pb-date-to"></div>
+        <button class="btn-ghost" id="pbCheck">Check photos in range</button>
+      </div>
+      <div id="pbResult" style="font-size:12.5px; margin-bottom:10px;"></div>
+      <div id="pbProgressWrap" style="display:none; margin-bottom:10px;">
+        <div style="background:var(--border); border-radius:6px; height:8px; overflow:hidden;"><div id="pbProgressBar" style="background:var(--sage); height:100%; width:0%; transition:width 0.2s;"></div></div>
+        <div id="pbProgressText" style="font-size:11px; color:var(--text-dim); margin-top:4px;"></div>
+      </div>
+      <button class="btn-new" id="pbDownload" style="display:none;">⬇ Download ZIP</button>
+    </div>
     <div class="filters">
       <input type="text" id="audit-filt-search" placeholder="Search staff, target, details…" style="width:220px;">
       <input type="date" id="audit-filt-date-from" title="From date">
@@ -738,6 +754,11 @@
         <div class="action-opt" data-v="exchange">Exchange</div>
       </div>
       <div class="hint" id="o-exchange-hint" style="display:none; margin-top:6px;">Driver swaps the full bin for an empty one in the same visit.</div>
+    </div>
+    <div class="field" id="o-quickbin-field" style="display:none; position:relative;"><label>Quick pick — search the bin that's already out</label>
+      <input type="text" id="o-quickbin-search" placeholder="Type a bin number…" autocomplete="off">
+      <div id="o-quickbin-dropdown" class="combo-dropdown" style="display:none;"></div>
+      <div class="hint" style="margin-top:5px;">Picking a bin here fills in the customer and site for you.</div>
     </div>
     <div class="field"><label>Target date</label><input type="date" id="o-date"></div>
     <div class="field" style="position:relative;"><label>Customer</label>
@@ -1678,6 +1699,14 @@ function renderAudit(){
       <td>${a.details||'—'}</td>
     </tr>`).join('');
   loadStorageStats();
+  if(isMaster()){
+    $('photoBackupPanel').style.display = 'block';
+    if(!$('pb-date-from').value){
+      const monthAgo = new Date(); monthAgo.setDate(monthAgo.getDate()-30);
+      $('pb-date-from').value = monthAgo.toISOString().slice(0,10);
+      $('pb-date-to').value = todayISO();
+    }
+  }
 }
 
 let storageStatsCache = null;
@@ -1697,13 +1726,85 @@ async function loadStorageStats(){
     }
     storageStatsCache = { totalBytes, totalFiles };
     const mb = (totalBytes / (1024*1024)).toFixed(1);
-    const freeTierPct = Math.min(100, (totalBytes / (1024*1024*1024)) * 100).toFixed(2);
-    widget.innerHTML = `📷 <b>${totalFiles}</b> trip photo(s) stored across all entities · <b>${mb} MB</b> used (~${freeTierPct}% of a 1GB free-tier bucket). Check your Supabase dashboard → Storage for exact billing-plan limits.`;
+    const proTierPct = Math.min(100, (totalBytes / (100*1024*1024*1024)) * 100).toFixed(2);
+    widget.innerHTML = `📷 <b>${totalFiles}</b> trip photo(s) stored across all entities · <b>${mb} MB</b> used (~${proTierPct}% of your 100GB Pro-tier bucket).`;
   } catch(e){
     console.error(e);
     widget.textContent = 'Could not load storage stats — check console.';
   }
 }
+
+// ===== Photo backup (date-scoped ZIP download) =====
+let pbPhotosInRange = [];
+function sanitizeFilename(s){ return (s||'').replace(/[^a-zA-Z0-9_-]/g, '_'); }
+
+$('pbCheck').addEventListener('click', async () => {
+  const from = $('pb-date-from').value, to = $('pb-date-to').value;
+  if(!from || !to){ toast('Select both dates'); return; }
+  $('pbResult').innerHTML = 'Checking…';
+  $('pbDownload').style.display = 'none';
+
+  const { data, error } = await sb.from('trip_log').select('id,trip_date,bin_number,client_id,photo_url,entity_id')
+    .not('photo_url', 'is', null).gte('trip_date', from).lte('trip_date', to);
+  if(error){ console.error(error); $('pbResult').textContent = 'Failed to check — see console.'; return; }
+
+  pbPhotosInRange = data || [];
+  if(pbPhotosInRange.length === 0){
+    $('pbResult').innerHTML = 'No photos found in this date range.';
+    return;
+  }
+  const estMB = (pbPhotosInRange.length * 0.2).toFixed(1); // ~200KB avg per photo
+  let msg = `<b>${pbPhotosInRange.length}</b> photo(s) found · roughly <b>~${estMB} MB</b> estimated.`;
+  if(pbPhotosInRange.length > 150){
+    msg += ` <span style="color:var(--carton);">⚠ That's a fairly large batch — consider narrowing the date range for a smoother download on slower connections or older devices.</span>`;
+  }
+  $('pbResult').innerHTML = msg;
+  $('pbDownload').style.display = 'inline-block';
+});
+
+$('pbDownload').addEventListener('click', async () => {
+  if(pbPhotosInRange.length === 0) return;
+  const btn = $('pbDownload');
+  btn.disabled = true;
+  $('pbProgressWrap').style.display = 'block';
+  const bar = $('pbProgressBar'), text = $('pbProgressText');
+  bar.style.width = '0%'; text.textContent = `Downloading 0 of ${pbPhotosInRange.length}…`;
+
+  try{
+    const zip = new JSZip();
+    let done = 0, failed = 0;
+    for(const trip of pbPhotosInRange){
+      try{
+        const res = await fetch(trip.photo_url);
+        if(!res.ok) throw new Error('fetch failed');
+        const blob = await res.blob();
+        const ext = (trip.photo_url.split('.').pop() || 'jpg').split('?')[0];
+        const fname = `${trip.trip_date}_${sanitizeFilename(trip.bin_number)}_${sanitizeFilename(clientName(trip.client_id))}_${trip.id.slice(0,8)}.${ext}`;
+        zip.file(fname, blob);
+      } catch(e){ failed++; console.error('Photo failed:', trip.id, e); }
+      done++;
+      bar.style.width = Math.round((done/pbPhotosInRange.length)*100) + '%';
+      text.textContent = `Downloading ${done} of ${pbPhotosInRange.length}…${failed?` (${failed} failed)`:''}`;
+    }
+    text.textContent = 'Zipping files…';
+    const content = await zip.generateAsync({ type:'blob' }, (meta) => {
+      bar.style.width = Math.round(meta.percent) + '%';
+    });
+    const url = URL.createObjectURL(content);
+    const a = document.createElement('a');
+    a.href = url; a.download = `jk-trip-photos-${$('pb-date-from').value}-to-${$('pb-date-to').value}.zip`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    text.textContent = `Done — ${done - failed} photo(s) downloaded${failed?`, ${failed} failed`:''}.`;
+    await logAudit('download_photo_backup', 'Photos', `Downloaded ${done-failed} photos (${$('pb-date-from').value} to ${$('pb-date-to').value})`);
+    toast('Photo backup downloaded');
+  } catch(e){
+    console.error(e);
+    text.textContent = 'Something went wrong — check console.';
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // ===== Full data backup (all entities, every table) =====
 $('exportFullBackup').addEventListener('click', async () => {
@@ -2418,7 +2519,43 @@ $('o-linkbin').addEventListener('change', () => {
 $('o-client-search').addEventListener('input', () => { $('o-client').value=''; renderOrderClientDropdown($('o-client-search').value); });
 $('o-client-search').addEventListener('focus', () => renderOrderClientDropdown($('o-client-search').value));
 document.addEventListener('click', (e) => { if(!e.target.closest('#o-client-search') && !e.target.closest('#o-client-dropdown')){ $('o-client-dropdown').style.display='none'; } });
-document.querySelectorAll('#o-action .action-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#o-action .action-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); orderActionSel=opt.dataset.v; refreshOrderLinkBinField(); }));
+
+// ===== Quick pick: search currently-deployed bins directly, auto-fill customer+site =====
+function allBinsCurrentlyOut(){
+  const byBin = {};
+  TRIPS.forEach(t => { const k=t.bin_number; if(!byBin[k] || t.created_at>byBin[k].created_at) byBin[k]=t; });
+  return Object.values(byBin).filter(t=>t.action==='deploy');
+}
+function renderQuickBinDropdown(rawText){
+  const dd = $('o-quickbin-dropdown');
+  const q = (rawText||'').trim().toLowerCase();
+  const bins = allBinsCurrentlyOut();
+  const matches = (q ? bins.filter(b=>b.bin_number.toLowerCase().includes(q)) : bins).slice(0,40);
+  if(matches.length===0){ dd.innerHTML = `<div class="combo-empty">No bins currently deployed</div>`; dd.style.display='block'; return; }
+  dd.innerHTML = matches.map(b=>`<div class="combo-item" data-tripid="${b.id}">${b.bin_number} <span style="color:var(--text-dim); font-size:11px;">— ${clientName(b.client_id)} — ${siteName(b.site_id)} — out ${daysSince(b.trip_date)}d</span></div>`).join('');
+  dd.style.display='block';
+  dd.querySelectorAll('.combo-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const trip = TRIPS.find(t=>t.id===item.dataset.tripid);
+      if(!trip) return;
+      $('o-quickbin-search').value = trip.bin_number;
+      dd.style.display = 'none';
+      $('o-client').value = trip.client_id;
+      $('o-client-search').value = clientName(trip.client_id);
+      refreshOrderSiteSelect(trip.client_id);
+      $('o-site').value = trip.site_id;
+      refreshOrderLinkBinField();
+      $('o-linkbin').value = trip.id;
+      orderWasteSel = trip.waste_type;
+      document.querySelectorAll('#o-waste .waste-opt').forEach(x=>x.classList.toggle('sel', x.dataset.v===trip.waste_type));
+    });
+  });
+}
+$('o-quickbin-search').addEventListener('input', () => renderQuickBinDropdown($('o-quickbin-search').value));
+$('o-quickbin-search').addEventListener('focus', () => renderQuickBinDropdown($('o-quickbin-search').value));
+document.addEventListener('click', (e) => { if(!e.target.closest('#o-quickbin-search') && !e.target.closest('#o-quickbin-dropdown')){ $('o-quickbin-dropdown').style.display='none'; } });
+
+document.querySelectorAll('#o-action .action-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#o-action .action-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); orderActionSel=opt.dataset.v; $('o-quickbin-field').style.display = (orderActionSel==='collect'||orderActionSel==='exchange') ? 'block' : 'none'; refreshOrderLinkBinField(); }));
 document.querySelectorAll('#o-waste .waste-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#o-waste .waste-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); orderWasteSel=opt.dataset.v; }));
 
 $('openNewOrder').addEventListener('click', () => {
@@ -2434,6 +2571,8 @@ $('openNewOrder').addEventListener('click', () => {
   document.querySelectorAll('#o-waste .waste-opt').forEach(o=>o.classList.remove('sel'));
   $('o-linkbin-field').style.display = 'none';
   $('o-linkbin').innerHTML = '<option value="">Select bin at this site…</option>';
+  $('o-quickbin-field').style.display = 'none';
+  $('o-quickbin-search').value = '';
   $('orderOverlay').classList.add('show');
 });
 function openOrderModal(orderId){
@@ -2449,6 +2588,8 @@ function openOrderModal(orderId){
   orderActionSel = o.action; orderWasteSel = o.waste_type;
   document.querySelectorAll('#o-action .action-opt').forEach(x=>x.classList.toggle('sel', x.dataset.v===o.action));
   document.querySelectorAll('#o-waste .waste-opt').forEach(x=>x.classList.toggle('sel', x.dataset.v===o.waste_type));
+  $('o-quickbin-field').style.display = (orderActionSel==='collect'||orderActionSel==='exchange') ? 'block' : 'none';
+  $('o-quickbin-search').value = '';
   refreshOrderLinkBinField();
   if(o.linked_trip_id) $('o-linkbin').value = o.linked_trip_id;
   $('orderOverlay').classList.add('show');
