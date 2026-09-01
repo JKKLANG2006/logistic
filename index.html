@@ -106,6 +106,7 @@
   .pill{ font-size:10px; padding:3px 9px; border-radius:20px; text-transform:uppercase; letter-spacing:0.4px; font-weight:600; white-space:nowrap; }
   .pill.deploy{ color: var(--blue); background: rgba(74,144,217,0.12); }
   .pill.collect{ color: var(--sage); background: rgba(107,144,128,0.15); }
+  .pill.loose{ color: var(--carton); background: rgba(168,118,63,0.15); }
   .pill.role-admin{ color: var(--amber); background: rgba(76,154,106,0.12); }
   .pill.role-maker{ color: var(--blue); background: rgba(74,144,217,0.12); }
   .pill.role-checker{ color: var(--text-dim); background: rgba(147,160,171,0.12); }
@@ -264,7 +265,10 @@
   <div class="view" id="view-orders">
     <div class="section-head">
       <h2>Orders</h2>
-      <button class="btn-new" id="openNewOrder" style="display:none;">+ New Order</button>
+      <div>
+        <button class="btn-ghost" id="openSchedules" style="display:none;">📅 Weekly Schedules</button>
+        <button class="btn-new" id="openNewOrder" style="display:none;">+ New Order</button>
+      </div>
     </div>
     <div class="filters">
       <span class="fchip active" data-orderstatus="pending">Pending</span>
@@ -313,6 +317,7 @@
       <span class="fchip active" data-action="all">All</span>
       <span class="fchip" data-action="deploy">Bin Out</span>
       <span class="fchip" data-action="collect">Bin In</span>
+      <span class="fchip" data-action="loose">Loose</span>
       <span class="clear" id="clearFilters">Clear filters</span>
     </div>
     <div class="filters" id="bulkBar" style="display:none;">
@@ -549,9 +554,10 @@
     <h2 id="tripModalTitle">New trip entry</h2>
     <div class="hint" id="tripModalHint">Log a bin deployment or pickup trip.</div>
     <div class="field"><label>Action</label>
-      <div class="action-grid" id="f-action">
+      <div class="action-grid" id="f-action" style="grid-template-columns:1fr 1fr 1fr;">
         <div class="action-opt" data-v="deploy">Bin Out</div>
         <div class="action-opt" data-v="collect">Bin In</div>
+        <div class="action-opt" data-v="loose">Loose</div>
       </div>
     </div>
     <div class="field"><label>Trip date</label><input type="date" id="f-date"></div>
@@ -748,12 +754,14 @@
     <h2 id="orderModalTitle">New order</h2>
     <div class="hint">Record a customer's request before a driver/bin is assigned.</div>
     <div class="field"><label>Action</label>
-      <div class="action-grid" id="o-action" style="grid-template-columns:1fr 1fr 1fr;">
+      <div class="action-grid" id="o-action" style="grid-template-columns:1fr 1fr 1fr 1fr;">
         <div class="action-opt" data-v="deploy">Bin Out</div>
         <div class="action-opt" data-v="collect">Bin In</div>
         <div class="action-opt" data-v="exchange">Exchange</div>
+        <div class="action-opt" data-v="loose">Loose</div>
       </div>
       <div class="hint" id="o-exchange-hint" style="display:none; margin-top:6px;">Driver swaps the full bin for an empty one in the same visit.</div>
+      <div class="hint" id="o-loose-hint" style="display:none; margin-top:6px;">Driver takes an empty bin on the lorry, loads the waste into it, and brings the bin back — nothing is left at the site.</div>
     </div>
     <div class="field" id="o-quickbin-field" style="display:none; position:relative;"><label>Quick pick — search the bin that's already out</label>
       <input type="text" id="o-quickbin-search" placeholder="Type a bin number…" autocomplete="off">
@@ -838,6 +846,66 @@
   </div>
 </div>
 
+<div class="overlay" id="schedulesOverlay">
+  <div class="modal" style="max-width:720px;">
+    <button class="close-x" id="closeSchedules">✕</button>
+    <h2>📅 Weekly Schedules</h2>
+    <div class="hint">Recurring collection schedules. On each scheduled day, a Pending order is created automatically when someone logs in — ready for Assign &amp; Dispatch.</div>
+    <div style="margin:12px 0;"><button class="btn-new" id="openNewSchedule">+ Add schedule</button></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Customer</th><th>Site</th><th>Action</th><th>Waste</th><th>Days</th><th>Status</th><th></th></tr></thead>
+        <tbody id="schedulesBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="scheduleEditOverlay">
+  <div class="modal">
+    <button class="close-x" id="closeScheduleEdit">✕</button>
+    <h2 id="scheduleEditTitle">Add schedule</h2>
+    <div class="field" style="position:relative;"><label>Customer</label>
+      <input type="text" id="sc-client-search" placeholder="Type to search customer…" autocomplete="off">
+      <input type="hidden" id="sc-client" value="">
+      <div id="sc-client-dropdown" class="combo-dropdown" style="display:none;"></div>
+    </div>
+    <div class="field"><label>Site</label><select id="sc-site"><option value="">Select customer first…</option></select></div>
+    <div class="field"><label>Action</label>
+      <div class="action-grid" id="sc-action" style="grid-template-columns:1fr 1fr 1fr 1fr;">
+        <div class="action-opt" data-v="deploy">Bin Out</div>
+        <div class="action-opt" data-v="collect">Bin In</div>
+        <div class="action-opt" data-v="exchange">Exchange</div>
+        <div class="action-opt" data-v="loose">Loose</div>
+      </div>
+    </div>
+    <div class="field"><label>Waste type</label>
+      <div class="waste-grid" id="sc-waste">
+        <div class="waste-opt" data-v="carton">Carton</div>
+        <div class="waste-opt" data-v="plastic">Plastic</div>
+        <div class="waste-opt" data-v="metal">Metal</div>
+        <div class="waste-opt" data-v="general">Rubbish</div>
+      </div>
+    </div>
+    <div class="field"><label>Days of the week</label>
+      <div class="waste-grid" id="sc-days" style="grid-template-columns:repeat(7,1fr);">
+        <div class="waste-opt" data-d="1">Mon</div>
+        <div class="waste-opt" data-d="2">Tue</div>
+        <div class="waste-opt" data-d="3">Wed</div>
+        <div class="waste-opt" data-d="4">Thu</div>
+        <div class="waste-opt" data-d="5">Fri</div>
+        <div class="waste-opt" data-d="6">Sat</div>
+        <div class="waste-opt" data-d="0">Sun</div>
+      </div>
+    </div>
+    <div class="field"><label>Notes (optional — e.g. Store / Mall)</label><input type="text" id="sc-notes"></div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancelScheduleEdit">Cancel</button>
+      <button class="btn-save" id="saveSchedule">Save schedule</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="warehouseLocOverlay">
   <div class="modal">
     <button class="close-x" id="closeWarehouseLoc">✕</button>
@@ -915,6 +983,8 @@ function clientName(id){ const c=CLIENTS.find(x=>x.id===id); return c?c.name:'�
 function siteName(id){ const s=SITES.find(x=>x.id===id); return s?s.site_name:'—'; }
 function entityName(id){ const e=ENTITIES.find(x=>x.id===id); return e?e.name:'—'; }
 function todayISO(){ return new Date().toISOString().slice(0,10); }
+function actionLabel(a){ return a==='deploy'?'Bin Out':a==='collect'?'Bin In':a==='exchange'?'Exchange':a==='loose'?'Loose':'—'; }
+function binTrips(){ return TRIPS.filter(t => t.action!=='loose' && t.bin_number); }
 function isMaster(){ return CURRENT_USER && CURRENT_USER.role === 'admin'; }
 function isMaker(){ return CURRENT_USER && CURRENT_USER.role === 'maker'; }
 function isChecker(){ return CURRENT_USER && CURRENT_USER.role === 'checker'; }
@@ -993,7 +1063,7 @@ function renderEntitySwitcher(){
   const wrap = $('entitySwitcherWrap');
   if(isMaster()){
     wrap.innerHTML = `<select id="entitySelect">${ENTITIES.map(e=>`<option value="${e.id}" ${e.id===ACTIVE_ENTITY_ID?'selected':''}>${e.name}</option>`).join('')}</select>`;
-    $('entitySelect').addEventListener('change', async (e) => { ACTIVE_ENTITY_ID = e.target.value; await loadAll(); subscribeRealtime(); });
+    $('entitySelect').addEventListener('change', async (e) => { ACTIVE_ENTITY_ID = e.target.value; await loadAll(); subscribeRealtime(); generateScheduledOrders(); });
   } else {
     wrap.innerHTML = `<div class="entity-static">${entityName(ACTIVE_ENTITY_ID)}</div>`;
   }
@@ -1029,7 +1099,7 @@ function enterApp(){
     const ordersTab = document.querySelector('.tab[data-view="orders"]');
     if(ordersTab) ordersTab.click();
   }
-  loadAll();
+  loadAll().then(() => generateScheduledOrders());
   startSessionTimeout();
   subscribeRealtime();
   startHeartbeat();
@@ -1346,10 +1416,10 @@ function renderLog(){
       <td>${clientName(t.client_id)}</td>
       <td>${siteName(t.site_id)}</td>
       <td>${t.lorry_number || '—'}</td>
-      <td>${t.bin_number}</td>
+      <td>${t.bin_number||'—'}</td>
       <td>${t.driver_name || '—'}</td>
       <td><span class="waste-dot ${t.waste_type}"></span>${t.waste_type}</td>
-      <td><span class="pill ${t.action}">${t.action==='deploy'?'Bin Out':'Bin In'}</span></td>
+      <td><span class="pill ${t.action}">${actionLabel(t.action)}</span></td>
       <td>${photoCell}</td>
       <td>${t.logged_by || '—'}</td>
       <td>${canReviewToggle()
@@ -1466,8 +1536,8 @@ $('exportPdf').addEventListener('click', async () => {
   doc.text(dateRangeLabel(), 14, 22);
   const body = rows.map(t => [
     fmtDate(t.trip_date), clientName(t.client_id), siteName(t.site_id),
-    t.lorry_number||'—', t.bin_number, t.driver_name||'—', t.waste_type,
-    t.action==='deploy'?'Bin Out':'Bin In', t.logged_by||'—', t.reviewed?'Yes':'No'
+    t.lorry_number||'—', t.bin_number||'—', t.driver_name||'—', t.waste_type,
+    actionLabel(t.action), t.logged_by||'—', t.reviewed?'Yes':'No'
   ]);
   doc.autoTable({ startY: 28, head: [['Date','Customer','Site','Lorry No.','Bin No.','Driver','Waste','Action','Logged by','Reviewed']], body, styles:{fontSize:8}, headStyles:{fillColor:[30,36,41]} });
   window.open(doc.output('bloburl'), '_blank');
@@ -1574,7 +1644,7 @@ function lastAckFor(binNumber){
 
 function renderBins(){
   const byBin = {};
-  TRIPS.forEach(t => {
+  binTrips().forEach(t => {
     const key = t.bin_number;
     if(!byBin[key]){ byBin[key]=t; return; }
     const cur = byBin[key];
@@ -1599,7 +1669,7 @@ function renderBins(){
     return `
     <div class="bin-card ${b._isLeaking?'leaking':''}" data-waste="${b.waste_type}">
       <div class="bnum">${b.bin_number}</div>
-      <div class="status"><span class="pill ${b.action}">${b.action==='deploy'?'Bin Out':'Bin In'}</span></div>
+      <div class="status"><span class="pill ${b.action}">${actionLabel(b.action)}</span></div>
       ${b._isLeaking ? `<div class="leak-badge">⚠ ${ds} days at site</div>` : ''}
       ${repair ? `<div class="leak-badge" style="color:var(--violet); background:rgba(110,95,199,0.12);">🔧 In repair at ${repair.workshop_name} since ${fmtDate(repair.sent_date)}</div>` : ''}
       ${warehouse ? `<div class="leak-badge" style="color:var(--teal); background:rgba(42,157,143,0.12);">📦 In warehouse (${warehouseName(warehouse.warehouse_id)}) since ${fmtDate(warehouse.received_date)}</div>` : ''}
@@ -1841,7 +1911,7 @@ $('exportFullBackup').addEventListener('click', async () => {
     const wb = XLSX.utils.book_new();
 
     const tripsSheet = [['Entity','Date','Customer','Site','Lorry No.','Bin No.','Driver','Waste','Action','Notes','Logged By','Reviewed','Reviewed By','Photo URL','Created At']]
-      .concat((allTrips||[]).map(t=>[eName(t.entity_id), t.trip_date, clientMap[t.client_id]||'—', siteMap[t.site_id]||'—', t.lorry_number||'', t.bin_number, t.driver_name||'', t.waste_type, t.action, t.notes||'', t.logged_by||'', t.reviewed?'Yes':'No', t.reviewed_by||'', t.photo_url||'', t.created_at]));
+      .concat((allTrips||[]).map(t=>[eName(t.entity_id), t.trip_date, clientMap[t.client_id]||'—', siteMap[t.site_id]||'—', t.lorry_number||'', t.bin_number||'', t.driver_name||'', t.waste_type, actionLabel(t.action), t.notes||'', t.logged_by||'', t.reviewed?'Yes':'No', t.reviewed_by||'', t.photo_url||'', t.created_at]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(tripsSheet), 'Trip Log');
 
     const custSheet = [['Entity','Customer Name','Contact Name','Contact Phone','Created At']]
@@ -2239,7 +2309,7 @@ $('addCustomerSite').addEventListener('click', async () => {
 });
 
 // ===== Excel template download + offline bulk import =====
-const IMPORT_HEADERS = ['Trip Date (YYYY-MM-DD)','Action (Bin Out / Bin In)','Customer Name','Site Name','Lorry Number','Bin Number','Driver Name','Waste Type (Carton/Plastic/Metal/Rubbish)','Notes'];
+const IMPORT_HEADERS = ['Trip Date (YYYY-MM-DD)','Action (Bin Out / Bin In / Loose)','Customer Name','Site Name','Lorry Number','Bin Number','Driver Name','Waste Type (Carton/Plastic/Metal/Rubbish)','Notes'];
 
 $('downloadTemplate').addEventListener('click', () => {
   const exampleRow = [todayISO(), 'Bin Out', 'Radams Enterprise', 'Klang Utama', 'WXY 1234', 'RR-014', 'Rabbani', 'Carton', 'Optional notes'];
@@ -2251,7 +2321,7 @@ $('downloadTemplate').addEventListener('click', () => {
     ['Instructions'],
     ['1. Fill one row per trip. Keep the header row as-is.'],
     ['2. Trip Date must be in YYYY-MM-DD format, e.g. 2026-08-26.'],
-    ['3. Action must be exactly "Bin Out" or "Bin In".'],
+    ['3. Action must be exactly "Bin Out", "Bin In", or "Loose". Loose = driver takes an empty bin on the lorry, loads at site, brings the bin back (bin not left at site). Bin Number = the bin taken.'],
     ['4. Waste Type must be exactly Carton, Plastic, Metal, or Rubbish.'],
     ['5. Customer Name and Site Name are matched to existing records if they already exist, or created automatically if not.'],
     ['6. Bin Number is required. Lorry Number, Driver Name and Notes are optional.'],
@@ -2278,6 +2348,7 @@ function normalizeAction(v){
   const s = String(v||'').trim().toLowerCase();
   if(s === 'bin out' || s === 'deploy') return 'deploy';
   if(s === 'bin in' || s === 'collect') return 'collect';
+  if(s === 'loose' || s === 'loose trip') return 'loose';
   return null;
 }
 function normalizeWaste(v){
@@ -2312,7 +2383,7 @@ $('importFileInput').addEventListener('change', async () => {
 
     const errors = [];
     const tripDate = normalizeDate(rawDate); if(!tripDate) errors.push('Invalid/missing date');
-    const action = normalizeAction(rawAction); if(!action) errors.push('Action must be "Bin Out" or "Bin In"');
+    const action = normalizeAction(rawAction); if(!action) errors.push('Action must be "Bin Out", "Bin In", or "Loose"');
     if(!custName) errors.push('Customer name required');
     if(!siteNm) errors.push('Site name required');
     if(!bin) errors.push('Bin number required');
@@ -2335,7 +2406,7 @@ function renderImportPreview(){
     <tr>
       <td>${r.rowNum}</td>
       <td>${r.tripDate || '—'}</td>
-      <td>${r.action ? (r.action==='deploy'?'Bin Out':'Bin In') : '—'}</td>
+      <td>${r.action ? actionLabel(r.action) : '—'}</td>
       <td>${r.custName || '—'}</td>
       <td>${r.siteNm || '—'}</td>
       <td>${r.bin || '—'}</td>
@@ -2407,6 +2478,7 @@ function orderIsOverdue(o){
 
 function renderOrders(){
   $('openNewOrder').style.display = canCreateOrder() ? 'inline-block' : 'none';
+  $('openSchedules').style.display = canEditOrder() ? 'inline-block' : 'none';
   let rows = filterOrderStatus==='all' ? ORDERS : ORDERS.filter(o=>o.status===filterOrderStatus);
   rows = [...rows].sort((a,b) => a.target_date.localeCompare(b.target_date));
   const body = $('ordersBody');
@@ -2436,7 +2508,7 @@ function renderOrders(){
       <td>${fmtDateTime(o.created_at)}</td>
       <td>${clientName(o.client_id)}</td>
       <td>${siteName(o.site_id)}</td>
-      <td><span class="pill ${o.action==='exchange'?'':o.action}" style="${o.action==='exchange'?'color:var(--violet); background:rgba(139,127,209,0.15);':''}">${o.action==='deploy'?'Bin Out':o.action==='collect'?'Bin In':'Exchange'}</span>${o.linked_trip_id ? `<div style="font-size:10px; color:var(--text-dim); margin-top:2px;">🔗 ${(TRIPS.find(t=>t.id===o.linked_trip_id)||{}).bin_number||'—'}</div>` : ''}</td>
+      <td><span class="pill ${o.action==='exchange'?'':o.action}" style="${o.action==='exchange'?'color:var(--violet); background:rgba(139,127,209,0.15);':''}">${actionLabel(o.action)}</span>${o.linked_trip_id ? `<div style="font-size:10px; color:var(--text-dim); margin-top:2px;">🔗 ${(TRIPS.find(t=>t.id===o.linked_trip_id)||{}).bin_number||'—'}</div>` : ''}</td>
       <td><span class="waste-dot ${o.waste_type}"></span>${o.waste_type}</td>
       <td>${o.postpone_count>0 ? `${o.postpone_count}x` : '—'}</td>
       <td>${o.notes||'—'}</td>
@@ -2497,13 +2569,14 @@ function refreshOrderSiteSelect(clientId){
 function binsCurrentlyAtSite(siteId){
   if(!siteId) return [];
   const byBin = {};
-  TRIPS.filter(t=>t.site_id===siteId).forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
+  binTrips().filter(t=>t.site_id===siteId).forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
   return Object.values(byBin).filter(t=>t.action==='deploy');
 }
 function refreshOrderLinkBinField(){
   const showLinkBin = orderActionSel === 'collect' || orderActionSel === 'exchange';
   $('o-linkbin-field').style.display = showLinkBin ? 'block' : 'none';
   $('o-exchange-hint').style.display = orderActionSel === 'exchange' ? 'block' : 'none';
+  $('o-loose-hint').style.display = orderActionSel === 'loose' ? 'block' : 'none';
   document.querySelector('#o-linkbin-field label').textContent = orderActionSel === 'exchange' ? 'Which full bin is being swapped out?' : 'Which bin is being collected?';
   if(!showLinkBin){ $('o-linkbin').value=''; return; }
   const siteId = $('o-site').value;
@@ -2531,7 +2604,7 @@ document.addEventListener('click', (e) => { if(!e.target.closest('#o-client-sear
 // ===== Quick pick: search currently-deployed bins directly, auto-fill customer+site =====
 function allBinsCurrentlyOut(){
   const byBin = {};
-  TRIPS.forEach(t => { const k=t.bin_number; if(!byBin[k] || t.created_at>byBin[k].created_at) byBin[k]=t; });
+  binTrips().forEach(t => { const k=t.bin_number; if(!byBin[k] || t.created_at>byBin[k].created_at) byBin[k]=t; });
   return Object.values(byBin).filter(t=>t.action==='deploy');
 }
 function renderQuickBinDropdown(rawText){
@@ -2718,13 +2791,13 @@ function assignBinHint(inputId, hintId, expectedAction, excludeTripId){
   if(!latest){ hint.style.display='none'; return; }
   const site = siteName(latest.site_id), client = clientName(latest.client_id);
   hint.style.display='block';
-  if(expectedAction === 'deploy'){
+  if(expectedAction === 'deploy' || expectedAction === 'loose'){
     if(latest.action === 'deploy'){
       hint.style.color = 'var(--red)';
-      hint.textContent = `⚠ Already Bin Out at ${client} — ${site} (${fmtDate(latest.trip_date)}) — collect it first`;
+      hint.textContent = `⚠ Already Bin Out at ${client} — ${site} (${fmtDate(latest.trip_date)}) — it can't be on the lorry`;
     } else {
       hint.style.color = 'var(--sage)';
-      hint.textContent = `✓ Last Bin In on ${fmtDate(latest.trip_date)} — available for Bin Out`;
+      hint.textContent = expectedAction==='loose' ? `✓ Bin is in — available to take on the lorry` : `✓ Last Bin In on ${fmtDate(latest.trip_date)} — available for Bin Out`;
     }
   } else {
     if(latest.action === 'deploy'){
@@ -2748,17 +2821,27 @@ function openAssignOrderModal(orderId){
   const o = ORDERS.find(x=>x.id===orderId);
   if(!o || !canAssignOrder()) return;
   activeAssignOrderId = orderId;
-  const actionLabel = o.action==='deploy' ? 'Bin Out' : o.action==='collect' ? 'Bin In' : 'Exchange';
-  $('assignOrderHint').textContent = `${clientName(o.client_id)} — ${siteName(o.site_id)} — ${actionLabel} (${o.waste_type})`;
+  const isLoose = o.action==='loose';
+  $('assignOrderHint').textContent = isLoose
+    ? `${clientName(o.client_id)} — ${siteName(o.site_id)} — Loose (${o.waste_type}). Bin travels with the lorry and is not left at site.`
+    : `${clientName(o.client_id)} — ${siteName(o.site_id)} — ${actionLabel(o.action)} (${o.waste_type})`;
   $('ao-lorry').value=''; $('ao-driver').value=''; $('ao-newbin').value=''; $('ao-photo').value='';
   const linkedTrip = o.linked_trip_id ? TRIPS.find(t=>t.id===o.linked_trip_id) : null;
 
-  if(o.action==='exchange'){
+  if(isLoose){
+    $('ao-bin-field').style.display = 'block';
+    $('ao-bin-label').textContent = 'Empty bin taken on the lorry (comes back with driver)';
+    $('ao-bin').value = '';
+    $('ao-bin').readOnly = false;
+    $('ao-newbin-field').style.display = 'none';
+  } else if(o.action==='exchange'){
+    $('ao-bin-field').style.display = 'block';
     $('ao-bin-label').textContent = 'Full bin being returned';
     $('ao-bin').value = linkedTrip ? linkedTrip.bin_number : '';
-    $('ao-bin').readOnly = true;
+    $('ao-bin').readOnly = !!linkedTrip;
     $('ao-newbin-field').style.display = 'block';
   } else {
+    $('ao-bin-field').style.display = 'block';
     $('ao-bin-label').textContent = 'Bin number';
     $('ao-bin').value = linkedTrip ? linkedTrip.bin_number : '';
     $('ao-bin').readOnly = false;
@@ -2799,7 +2882,25 @@ $('saveAssignOrder').addEventListener('click', async () => {
     catch(e){ console.error(e); toast('Photo upload failed — continuing without it'); }
   }
 
-  if(o.action==='exchange'){
+  if(o.action==='loose'){
+    const looseBin = $('ao-bin').value.trim();
+    if(!looseBin){ toast('Enter the empty bin the driver is taking'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+    if(!driver){ toast('Enter the driver name'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+    const lbLatest = getLatestTripForBin(looseBin, null);
+    if(lbLatest && lbLatest.action === 'deploy'){
+      const site = siteName(lbLatest.site_id), client = clientName(lbLatest.client_id);
+      const ok = confirm(`Bin ${looseBin} is marked Bin Out at ${client} — ${site}. It can't be on the lorry for a loose trip.\n\nDispatch anyway?`);
+      if(!ok){ saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+      await logAudit('bin_out_conflict_override', looseBin, `Used for loose trip while marked out at ${client} — ${site}`);
+    }
+    const tripPayload = { trip_date: todayISO(), client_id: o.client_id, site_id: o.site_id, lorry_number: lorry, bin_number: looseBin, driver_name: driver, waste_type: o.waste_type, action: 'loose', notes: o.notes||null, photo_url: photoUrl, logged_by: CURRENT_USER.name, entity_id: ACTIVE_ENTITY_ID };
+    const { data: tripData, error: tripErr } = await sb.from('trip_log').insert(tripPayload).select().single();
+    if(tripErr){ console.error(tripErr); toast('Failed to create trip'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+    const { error: orderErr } = await sb.from('orders').update({ status:'completed', completed_trip_id: tripData.id, updated_at: new Date().toISOString() }).eq('id', o.id);
+    if(orderErr){ console.error(orderErr); toast('Trip created but failed to close order — check console'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
+    await logAudit('dispatch_order_loose', clientName(o.client_id), `Loose collection — bin ${looseBin} on lorry, driver ${driver}, lorry ${lorry||'—'}`);
+    toast('Loose trip dispatched and completed');
+  } else if(o.action==='exchange'){
     const oldBin = $('ao-bin').value.trim();
     const newBin = $('ao-newbin').value.trim();
     if(!oldBin){ toast('Missing the returning bin number'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
@@ -2851,6 +2952,188 @@ $('saveAssignOrder').addEventListener('click', async () => {
   await loadOrders(); renderOrders(); await loadAll();
 });
 
+// ===== Weekly order schedules (recurring auto-generated orders) =====
+let ORDER_SCHEDULES = [];
+let editingScheduleId = null;
+let scActionSel = null, scWasteSel = null, scDaysSel = new Set();
+const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+async function loadSchedules(){
+  const { data, error } = await sb.from('order_schedules').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('created_at');
+  if(error){ console.error(error); return; }
+  ORDER_SCHEDULES = data || [];
+}
+
+function renderSchedules(){
+  const body = $('schedulesBody');
+  if(ORDER_SCHEDULES.length===0){ body.innerHTML = '<tr><td colspan="7"><div class="empty-state">No schedules yet — add one to auto-generate recurring orders</div></td></tr>'; return; }
+  body.innerHTML = ORDER_SCHEDULES.map(s => `
+    <tr>
+      <td>${clientName(s.client_id)}</td>
+      <td>${siteName(s.site_id)}</td>
+      <td><span class="pill ${s.action==='exchange'?'':s.action}" style="${s.action==='exchange'?'color:var(--violet); background:rgba(139,127,209,0.15);':''}">${actionLabel(s.action)}</span></td>
+      <td><span class="waste-dot ${s.waste_type}"></span>${s.waste_type}</td>
+      <td>${(s.days_of_week||[]).sort((a,b)=>((a===0?7:a)-(b===0?7:b))).map(d=>DAY_NAMES[d]).join(', ')||'—'}</td>
+      <td>${s.active ? '<span class="pill collect">Active</span>' : '<span class="pill" style="color:var(--text-dim); background:rgba(122,128,135,0.12);">Paused</span>'}</td>
+      <td>
+        ${canEditOrder() ? `<button class="row-btn" data-toggle-sched="${s.id}">${s.active?'Pause':'Resume'}</button><button class="row-btn edit" data-edit-sched="${s.id}">Edit</button>` : ''}
+        ${canDelete() ? `<button class="row-btn del" data-del-sched="${s.id}">Delete</button>` : ''}
+      </td>
+    </tr>`).join('');
+  body.querySelectorAll('[data-edit-sched]').forEach(btn => btn.addEventListener('click', () => openScheduleEditModal(btn.dataset.editSched)));
+  body.querySelectorAll('[data-toggle-sched]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const s = ORDER_SCHEDULES.find(x=>x.id===btn.dataset.toggleSched);
+      const { error } = await sb.from('order_schedules').update({ active: !s.active }).eq('id', s.id);
+      if(error){ console.error(error); toast('Failed to update'); return; }
+      await logAudit(s.active?'pause_schedule':'resume_schedule', clientName(s.client_id), `${s.active?'Paused':'Resumed'} weekly schedule for ${siteName(s.site_id)}`);
+      await loadSchedules(); renderSchedules();
+    });
+  });
+  body.querySelectorAll('[data-del-sched]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const s = ORDER_SCHEDULES.find(x=>x.id===btn.dataset.delSched);
+      if(!confirm(`Delete the weekly schedule for ${clientName(s.client_id)} — ${siteName(s.site_id)}? Already-generated orders are not affected.`)) return;
+      const { error } = await sb.from('order_schedules').delete().eq('id', s.id);
+      if(error){ console.error(error); toast('Failed to delete'); return; }
+      await logAudit('delete_schedule', clientName(s.client_id), `Deleted weekly schedule for ${siteName(s.site_id)}`);
+      toast('Schedule deleted');
+      await loadSchedules(); renderSchedules();
+    });
+  });
+}
+
+$('openSchedules').addEventListener('click', async () => {
+  await loadSchedules();
+  renderSchedules();
+  $('openNewSchedule').style.display = canEditOrder() ? 'inline-block' : 'none';
+  $('schedulesOverlay').classList.add('show');
+});
+$('closeSchedules').addEventListener('click', () => $('schedulesOverlay').classList.remove('show'));
+
+function renderScClientDropdown(rawText){
+  const dd = $('sc-client-dropdown');
+  const q = (rawText||'').trim().toLowerCase();
+  const matches = (q ? CLIENTS.filter(c=>c.name.toLowerCase().includes(q)) : CLIENTS).slice(0,50);
+  if(matches.length===0){ dd.style.display='none'; return; }
+  dd.innerHTML = matches.map(c=>`<div class="combo-item" data-id="${c.id}" data-label="${c.name.replace(/"/g,'&quot;')}">${c.name}</div>`).join('');
+  dd.style.display='block';
+  dd.querySelectorAll('.combo-item').forEach(item => {
+    item.addEventListener('click', () => {
+      $('sc-client').value = item.dataset.id; $('sc-client-search').value = item.dataset.label;
+      dd.style.display='none';
+      const opts = SITES.filter(s=>s.client_id===item.dataset.id);
+      $('sc-site').innerHTML = opts.length ? '<option value="">Select site…</option>' + opts.map(s=>`<option value="${s.id}">${s.site_name}</option>`).join('') : '<option value="">No sites for this customer</option>';
+    });
+  });
+}
+$('sc-client-search').addEventListener('input', () => { $('sc-client').value=''; renderScClientDropdown($('sc-client-search').value); });
+$('sc-client-search').addEventListener('focus', () => renderScClientDropdown($('sc-client-search').value));
+document.addEventListener('click', (e) => { if(!e.target.closest('#sc-client-search') && !e.target.closest('#sc-client-dropdown')){ $('sc-client-dropdown').style.display='none'; } });
+document.querySelectorAll('#sc-action .action-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#sc-action .action-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); scActionSel=opt.dataset.v; }));
+document.querySelectorAll('#sc-waste .waste-opt').forEach(opt => opt.addEventListener('click', () => { document.querySelectorAll('#sc-waste .waste-opt').forEach(o=>o.classList.remove('sel')); opt.classList.add('sel'); scWasteSel=opt.dataset.v; }));
+document.querySelectorAll('#sc-days .waste-opt').forEach(opt => opt.addEventListener('click', () => {
+  const d = parseInt(opt.dataset.d, 10);
+  if(scDaysSel.has(d)){ scDaysSel.delete(d); opt.classList.remove('sel'); }
+  else { scDaysSel.add(d); opt.classList.add('sel'); }
+}));
+
+function openScheduleEditModal(scheduleId){
+  const s = scheduleId ? ORDER_SCHEDULES.find(x=>x.id===scheduleId) : null;
+  editingScheduleId = scheduleId || null;
+  $('scheduleEditTitle').textContent = s ? 'Edit schedule' : 'Add schedule';
+  $('sc-client-search').value = s ? clientName(s.client_id) : '';
+  $('sc-client').value = s ? s.client_id : '';
+  if(s){
+    const opts = SITES.filter(x=>x.client_id===s.client_id);
+    $('sc-site').innerHTML = '<option value="">Select site…</option>' + opts.map(x=>`<option value="${x.id}">${x.site_name}</option>`).join('');
+    $('sc-site').value = s.site_id;
+  } else {
+    $('sc-site').innerHTML = '<option value="">Select customer first…</option>';
+  }
+  scActionSel = s ? s.action : null;
+  scWasteSel = s ? s.waste_type : null;
+  scDaysSel = new Set(s ? (s.days_of_week||[]) : []);
+  document.querySelectorAll('#sc-action .action-opt').forEach(x=>x.classList.toggle('sel', s && x.dataset.v===s.action));
+  document.querySelectorAll('#sc-waste .waste-opt').forEach(x=>x.classList.toggle('sel', s && x.dataset.v===s.waste_type));
+  document.querySelectorAll('#sc-days .waste-opt').forEach(x=>x.classList.toggle('sel', scDaysSel.has(parseInt(x.dataset.d,10))));
+  $('sc-notes').value = s ? (s.notes||'') : '';
+  $('scheduleEditOverlay').classList.add('show');
+}
+$('openNewSchedule').addEventListener('click', () => openScheduleEditModal(null));
+$('closeScheduleEdit').addEventListener('click', () => $('scheduleEditOverlay').classList.remove('show'));
+$('cancelScheduleEdit').addEventListener('click', () => $('scheduleEditOverlay').classList.remove('show'));
+$('saveSchedule').addEventListener('click', async () => {
+  const btn = $('saveSchedule'); if(btn.disabled) return; btn.disabled = true;
+  try {
+    if(!$('sc-client').value){ toast('Select a customer'); return; }
+    if(!$('sc-site').value){ toast('Select a site'); return; }
+    if(!scActionSel){ toast('Select an action'); return; }
+    if(!scWasteSel){ toast('Select waste type'); return; }
+    if(scDaysSel.size===0){ toast('Select at least one day'); return; }
+    const payload = {
+      client_id: $('sc-client').value, site_id: $('sc-site').value, action: scActionSel,
+      waste_type: scWasteSel, days_of_week: [...scDaysSel], notes: $('sc-notes').value||null
+    };
+    if(editingScheduleId){
+      const { error } = await sb.from('order_schedules').update(payload).eq('id', editingScheduleId);
+      if(error){ console.error(error); toast('Failed to update schedule'); return; }
+      await logAudit('edit_schedule', clientName(payload.client_id), `Updated weekly schedule for ${siteName(payload.site_id)}`);
+      toast('Schedule updated');
+    } else {
+      const { error } = await sb.from('order_schedules').insert({ ...payload, entity_id: ACTIVE_ENTITY_ID, created_by: CURRENT_USER.name });
+      if(error){ console.error(error); toast('Failed to save schedule'); return; }
+      await logAudit('create_schedule', clientName(payload.client_id), `New weekly schedule for ${siteName(payload.site_id)} (${[...scDaysSel].map(d=>DAY_NAMES[d]).join(', ')})`);
+      toast('Schedule saved');
+    }
+    $('scheduleEditOverlay').classList.remove('show');
+    await loadSchedules(); renderSchedules();
+  } finally { btn.disabled = false; }
+});
+
+// --- Auto-generation: creates today's scheduled orders, race-safe via claim-first pattern ---
+async function generateScheduledOrders(){
+  const today = todayISO();
+  const todayDow = new Date().getDay();
+  const { data: due, error } = await sb.from('order_schedules').select('*')
+    .eq('entity_id', ACTIVE_ENTITY_ID).eq('active', true)
+    .contains('days_of_week', [todayDow])
+    .or(`last_generated_date.is.null,last_generated_date.lt.${today}`);
+  if(error){ console.error(error); return; }
+  if(!due || due.length===0) return;
+
+  let created = 0;
+  for(const s of due){
+    // Claim first: only whoever successfully flips last_generated_date creates the order (prevents duplicates across simultaneous logins)
+    const { data: claimed, error: claimErr } = await sb.from('order_schedules')
+      .update({ last_generated_date: today })
+      .eq('id', s.id)
+      .or(`last_generated_date.is.null,last_generated_date.lt.${today}`)
+      .select();
+    if(claimErr || !claimed || claimed.length===0) continue; // someone else claimed it
+
+    // Auto-link a bin for collect/exchange if exactly one bin currently at that site
+    let linkedTripId = null;
+    if(s.action==='collect' || s.action==='exchange'){
+      const binsAtSite = binsCurrentlyAtSite(s.site_id);
+      if(binsAtSite.length === 1) linkedTripId = binsAtSite[0].id;
+    }
+    const { error: insErr } = await sb.from('orders').insert({
+      entity_id: ACTIVE_ENTITY_ID, client_id: s.client_id, site_id: s.site_id,
+      action: s.action, waste_type: s.waste_type, target_date: today, original_target_date: today,
+      notes: s.notes||null, taken_by: 'Scheduled', linked_trip_id: linkedTripId
+    });
+    if(insErr){ console.error(insErr); continue; }
+    await logAudit('scheduled_order_generated', clientName(s.client_id), `Auto-created today's order for ${siteName(s.site_id)}`);
+    created++;
+  }
+  if(created > 0){
+    toast(`${created} scheduled order(s) created for today`);
+    await loadOrders();
+    if($('view-orders').classList.contains('active')) renderOrders();
+  }
+}
+
 // ===== Warehouse tracking =====
 let filterWhLeakage = 'all';
 let editingWarehouseLocId = null;
@@ -2875,6 +3158,12 @@ function latestWarehouseEntryFor(binNumber){
     return latest;
   }, null);
 }
+function warehouseIdleDays(w){
+  // A bin taken out on loose trips is being used, even though it's never "deployed" — count that as activity
+  const lastLoose = TRIPS.filter(t=>t.action==='loose' && t.bin_number===w.bin_number && t.trip_date>=w.received_date)
+                         .reduce((m,t)=> t.trip_date>m ? t.trip_date : m, w.received_date);
+  return daysSince(lastLoose);
+}
 function currentWarehouseBins(){
   // bins whose most recent event across trips/repairs/warehouse-log is a warehouse receipt
   // Uses created_at timestamps (not just the date) so same-day events are ordered correctly
@@ -2896,15 +3185,15 @@ function renderWarehouse(){
   $('whLeakageChip').style.display = canSeeLeakage() ? 'inline-block' : 'none';
 
   let bins = currentWarehouseBins();
-  if(filterWhLeakage==='idle') bins = bins.filter(w => daysSince(w.received_date) >= WAREHOUSE_LEAKAGE_THRESHOLD_DAYS);
+  if(filterWhLeakage==='idle') bins = bins.filter(w => warehouseIdleDays(w) >= WAREHOUSE_LEAKAGE_THRESHOLD_DAYS);
   bins.sort((a,b)=>a.bin_number.localeCompare(b.bin_number));
 
   const body = $('warehouseLogBody');
   if(bins.length===0){ body.innerHTML = '<tr><td colspan="6"><div class="empty-state">No bins currently in warehouse</div></td></tr>'; }
   else {
     body.innerHTML = bins.map(w => {
-      const idle = daysSince(w.received_date) >= WAREHOUSE_LEAKAGE_THRESHOLD_DAYS;
-      const dateCell = idle ? `<span style="color:var(--red); font-weight:600;">⚠ ${fmtDate(w.received_date)} (${daysSince(w.received_date)}d)</span>` : fmtDate(w.received_date);
+      const idleDays = warehouseIdleDays(w); const idle = idleDays >= WAREHOUSE_LEAKAGE_THRESHOLD_DAYS;
+      const dateCell = idle ? `<span style="color:var(--red); font-weight:600;">⚠ ${fmtDate(w.received_date)} (${idleDays}d idle)</span>` : fmtDate(w.received_date);
       return `
       <tr>
         <td>${w.bin_number}</td>
@@ -3063,7 +3352,7 @@ function currentBinStatusLabel(binNumber){
   const repair = openBinRepairs()[binNumber];
   if(repair) return `<span class="pill deploy" style="background:rgba(110,95,199,0.12); color:var(--violet);">In Repair</span>`;
   if(!latest) return `<span class="pill reviewed-no">Never used</span>`;
-  return `<span class="pill ${latest.action}">${latest.action==='deploy'?'Bin Out':'Bin In'}</span>`;
+  return `<span class="pill ${latest.action}">${actionLabel(latest.action)}</span>`;
 }
 
 function renderBinRegistry(){
@@ -3295,7 +3584,7 @@ function openCustomerTraceModal(customerId){
   const trips = TRIPS.filter(t=>t.client_id===customerId).sort((a,b)=>b.trip_date.localeCompare(a.trip_date));
 
   const byBin = {};
-  trips.forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
+  trips.filter(t=>t.action!=='loose' && t.bin_number).forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
   const currentBins = Object.values(byBin).filter(b=>b.action==='deploy');
 
   const branchesHtml = sites.length
@@ -3309,7 +3598,7 @@ function openCustomerTraceModal(customerId){
   const tripsHtml = trips.length
     ? `<div class="table-wrap" style="max-height:260px; overflow-y:auto;"><table>
         <thead><tr><th>Date</th><th>Site</th><th>Bin</th><th>Action</th><th>Driver</th></tr></thead>
-        <tbody>${trips.slice(0,50).map(t=>`<tr><td>${fmtDate(t.trip_date)}</td><td>${siteName(t.site_id)}</td><td>${t.bin_number}</td><td><span class="pill ${t.action}">${t.action==='deploy'?'Bin Out':'Bin In'}</span></td><td>${t.driver_name||'—'}</td></tr>`).join('')}</tbody>
+        <tbody>${trips.slice(0,50).map(t=>`<tr><td>${fmtDate(t.trip_date)}</td><td>${siteName(t.site_id)}</td><td>${t.bin_number||'—'}</td><td><span class="pill ${t.action}">${actionLabel(t.action)}</span></td><td>${t.driver_name||'—'}</td></tr>`).join('')}</tbody>
       </table></div>${trips.length>50?`<div style="font-size:11px;color:var(--text-dim);margin-top:6px;">Showing most recent 50 of ${trips.length} trips</div>`:''}`
     : '<div class="empty-state" style="padding:14px;">No trip history yet</div>';
 
@@ -3339,7 +3628,7 @@ function renderAlertsWidget(){
   if(alertsDismissedToday() || isMaker()){ wrap.style.display='none'; return; }
 
   const byBin = {};
-  TRIPS.forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
+  binTrips().forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
   const leakingCount = Object.values(byBin).filter(b=>b.action==='deploy' && daysSince(b.trip_date)>=LEAKAGE_THRESHOLD_DAYS).length;
   const overdueRepairs = MAINTENANCE.filter(m=>m.status==='in_repair' && daysSince(m.sent_date)>=14).length;
   const unreviewedCount = TRIPS.filter(t=>!t.reviewed).length;
@@ -3349,7 +3638,7 @@ function renderAlertsWidget(){
     return days >= CUSTOMER_LEAKAGE_THRESHOLD_DAYS;
   }).length;
   const overdueOrdersCount = ORDERS.filter(o => orderIsOverdue(o)).length;
-  const idleWarehouseCount = currentWarehouseBins().filter(w => daysSince(w.received_date) >= WAREHOUSE_LEAKAGE_THRESHOLD_DAYS).length;
+  const idleWarehouseCount = currentWarehouseBins().filter(w => warehouseIdleDays(w) >= WAREHOUSE_LEAKAGE_THRESHOLD_DAYS).length;
 
   if(leakingCount===0 && overdueRepairs===0 && unreviewedCount===0 && inactiveCustCount===0 && overdueOrdersCount===0 && idleWarehouseCount===0){
     wrap.innerHTML = `<div class="alerts-widget"><div class="alert-card ok"><div class="an">✓</div><div class="al">No leakage, overdue items, or unreviewed trips</div></div></div>`;
@@ -3608,6 +3897,7 @@ function cpMatchEntity(q, list, nameKey){
 }
 function cpExtractAction(q){
   if(/\bbin out\b|\bdeployed?\b|\bdeploy(ing)?\b/.test(q)) return 'deploy';
+  if(/\bloose\b/.test(q)) return 'loose';
   if(/\bbin in\b|\bcollected?\b|\bcollect(ing)?\b|\bpicked up\b/.test(q)) return 'collect';
   return null;
 }
@@ -3645,7 +3935,7 @@ function runCopilotQuery(rawQuery){
   // ----- Repair / maintenance queries -----
   if(cpIsRepair(q)){
     let rows = MAINTENANCE.filter(m=>m.status==='in_repair');
-    if(binMatch) rows = rows.filter(r=>r.bin_number.toLowerCase().includes(binMatch[1]));
+    if(binMatch) rows = rows.filter(r=>(r.bin_number||'').toLowerCase().includes(binMatch[1]));
     if(rows.length===0) return { summary: "No bins are currently in repair." };
     if(wantCount) return { summary: `<span class="cp-count">${rows.length}</span> bin(s) currently in repair.` };
     return {
@@ -3659,7 +3949,7 @@ function runCopilotQuery(rawQuery){
   if(cpIsLeakage(q)){
     const threshold = daysThreshold || LEAKAGE_THRESHOLD_DAYS;
     const byBin = {};
-    TRIPS.forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
+    binTrips().forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
     let bins = Object.values(byBin).filter(b => b.action==='deploy' && daysSince(b.trip_date) >= threshold);
     if(matchedClient) bins = bins.filter(b=>b.client_id===matchedClient.id);
     if(bins.length===0) return { summary: `No bins currently out ${threshold}+ days${matchedClient?` at ${matchedClient.name}`:''}.` };
@@ -3684,7 +3974,7 @@ function runCopilotQuery(rawQuery){
   if(matchedClient) rows = rows.filter(t=>t.client_id===matchedClient.id);
   if(matchedSite) rows = rows.filter(t=>t.site_id===matchedSite.id);
   if(matchedDriver) rows = rows.filter(t=>(t.driver_name||'').toLowerCase()===matchedDriver.driver_name);
-  if(binMatch) rows = rows.filter(t=>t.bin_number.toLowerCase().includes(binMatch[1]));
+  if(binMatch) rows = rows.filter(t=>(t.bin_number||'').toLowerCase().includes(binMatch[1]));
   if(action) rows = rows.filter(t=>t.action===action);
   if(waste) rows = rows.filter(t=>t.waste_type===waste);
   if(cpIsUnreviewed(q)) rows = rows.filter(t=>!t.reviewed);
@@ -3696,7 +3986,7 @@ function runCopilotQuery(rawQuery){
   }
 
   const descBits = [];
-  if(action) descBits.push(action==='deploy'?'Bin Out':'Bin In');
+  if(action) descBits.push(actionLabel(action));
   if(waste) descBits.push(waste);
   descBits.push('trips');
   if(matchedClient) descBits.push(`at ${matchedClient.name}`);
@@ -3712,7 +4002,7 @@ function runCopilotQuery(rawQuery){
   return {
     summary: `${rows.length} ${desc}${rows.length>25?' (showing first 25)':''}:`,
     columns: ['Date','Customer','Site','Bin No.','Driver','Waste','Action','Reviewed'],
-    rows: rows.slice(0,25).map(t=>[fmtDate(t.trip_date), clientName(t.client_id), siteName(t.site_id), t.bin_number, t.driver_name||'—', t.waste_type, t.action==='deploy'?'Bin Out':'Bin In', t.reviewed?'Yes':'No'])
+    rows: rows.slice(0,25).map(t=>[fmtDate(t.trip_date), clientName(t.client_id), siteName(t.site_id), t.bin_number||'—', t.driver_name||'—', t.waste_type, actionLabel(t.action), t.reviewed?'Yes':'No'])
   };
 }
 
@@ -3913,7 +4203,7 @@ $('closeTrip').addEventListener('click', () => $('tripOverlay').classList.remove
 $('cancelTrip').addEventListener('click', () => $('tripOverlay').classList.remove('show'));
 
 function getLatestTripForBin(binNumber, excludeTripId){
-  const matches = TRIPS.filter(t => t.bin_number === binNumber && t.id !== excludeTripId);
+  const matches = TRIPS.filter(t => t.action!=='loose' && t.bin_number === binNumber && t.id !== excludeTripId);
   if(matches.length === 0) return null;
   return matches.reduce((latest, t) => {
     if(!latest) return t;
@@ -3931,13 +4221,13 @@ function updateBinStatusHint(){
   const site = siteName(latest.site_id), client = clientName(latest.client_id);
   hint.style.display='block';
 
-  if(newActionSelection === 'deploy'){
+  if(newActionSelection === 'deploy' || newActionSelection === 'loose'){
     if(latest.action === 'deploy'){
       hint.style.color = 'var(--red)';
-      hint.textContent = `⚠ Already Bin Out at ${client} — ${site} (${fmtDate(latest.trip_date)}) — collect it first`;
+      hint.textContent = `⚠ Already Bin Out at ${client} — ${site} (${fmtDate(latest.trip_date)}) — ${newActionSelection==='loose' ? "it can't be on the lorry" : 'collect it first'}`;
     } else {
       hint.style.color = 'var(--sage)';
-      hint.textContent = `✓ Last Bin In on ${fmtDate(latest.trip_date)} — available for Bin Out`;
+      hint.textContent = newActionSelection==='loose' ? `✓ Bin is in — available to take on the lorry` : `✓ Last Bin In on ${fmtDate(latest.trip_date)} — available for Bin Out`;
     }
   } else if(newActionSelection === 'collect'){
     if(latest.action === 'deploy'){
@@ -3990,7 +4280,7 @@ document.addEventListener('click', (e) => {
 $('saveTrip').addEventListener('click', async () => {
   const btn = $('saveTrip'); if(btn.disabled) return; btn.disabled = true;
   try {
-  if(!newActionSelection){ toast('Select deploy or collect'); return; }
+  if(!newActionSelection){ toast('Select Bin Out, Bin In, or Loose'); return; }
   if(!$('f-date').value){ toast('Select a trip date'); return; }
   if(!$('f-bin').value.trim()){ toast('Enter the bin number'); return; }
   if(!newWasteSelection){ toast('Select the waste type'); return; }
@@ -3998,7 +4288,7 @@ $('saveTrip').addEventListener('click', async () => {
   const binNumber = $('f-bin').value.trim();
   const latest = getLatestTripForBin(binNumber, editingTripId);
   if(latest){
-    if(newActionSelection === 'deploy' && latest.action === 'deploy'){
+    if((newActionSelection === 'deploy' || newActionSelection === 'loose') && latest.action === 'deploy'){
       const site = siteName(latest.site_id), client = clientName(latest.client_id);
       const ok = confirm(`Bin ${binNumber} is already marked Bin Out at ${client} — ${site} and hasn't been logged as Bin In yet.\n\nThis bin should be collected before being deployed again. Log this anyway?`);
       if(!ok) return;
@@ -4044,7 +4334,7 @@ $('saveTrip').addEventListener('click', async () => {
   if(editingTripId){
     const update = {
       trip_date: $('f-date').value, client_id: clientId, site_id: siteId,
-      lorry_number: $('f-lorry').value||null, bin_number: $('f-bin').value.trim(),
+      lorry_number: $('f-lorry').value||null, bin_number: binNumber,
       driver_name: $('f-driver').value||null, waste_type: newWasteSelection,
       action: newActionSelection, notes: $('f-notes').value||null, photo_url: photoUrl,
       last_edited_by: CURRENT_USER ? CURRENT_USER.name : null, last_edited_at: new Date().toISOString()
@@ -4056,14 +4346,14 @@ $('saveTrip').addEventListener('click', async () => {
   } else {
     const payload = {
       trip_date: $('f-date').value, client_id: clientId, site_id: siteId,
-      lorry_number: $('f-lorry').value||null, bin_number: $('f-bin').value.trim(),
+      lorry_number: $('f-lorry').value||null, bin_number: binNumber,
       driver_name: $('f-driver').value||null, waste_type: newWasteSelection,
       action: newActionSelection, notes: $('f-notes').value||null, photo_url: photoUrl,
       logged_by: CURRENT_USER ? CURRENT_USER.name : null, entity_id: ACTIVE_ENTITY_ID
     };
     const { error } = await sb.from('trip_log').insert(payload);
     if(error){ console.error(error); toast('Failed to save — check console'); return; }
-    await logAudit(newActionSelection==='deploy'?'deploy_bin':'collect_bin', payload.bin_number, `${clientName(clientId)} — ${siteName(siteId)}`);
+    await logAudit(newActionSelection==='deploy'?'deploy_bin':newActionSelection==='collect'?'collect_bin':'loose_trip', payload.bin_number||'(no bin)', `${clientName(clientId)} — ${siteName(siteId)}`);
     toast('Trip logged');
   }
   $('saveTrip').textContent = editingTripId ? 'Save changes' : 'Log trip';
@@ -4073,7 +4363,7 @@ $('saveTrip').addEventListener('click', async () => {
   } finally { btn.disabled = false; }
 });
 
-[$('tripOverlay'), $('newStaffOverlay'), $('customerOverlay'), $('customerSitesOverlay'), $('customerTraceOverlay'), $('maintenanceOverlay'), $('binRegistryOverlay'), $('lorryRegistryOverlay'), $('importExcelOverlay'), $('orderOverlay'), $('assignOrderOverlay'), $('postponeOverlay'), $('cancelOrderOverlay'), $('warehouseLocOverlay'), $('receiveBinOverlay')].forEach(ov => ov.addEventListener('click', (e) => { if(e.target===ov) ov.classList.remove('show'); }));
+[$('tripOverlay'), $('newStaffOverlay'), $('customerOverlay'), $('customerSitesOverlay'), $('customerTraceOverlay'), $('maintenanceOverlay'), $('binRegistryOverlay'), $('lorryRegistryOverlay'), $('importExcelOverlay'), $('orderOverlay'), $('assignOrderOverlay'), $('postponeOverlay'), $('cancelOrderOverlay'), $('warehouseLocOverlay'), $('receiveBinOverlay'), $('schedulesOverlay'), $('scheduleEditOverlay')].forEach(ov => ov.addEventListener('click', (e) => { if(e.target===ov) ov.classList.remove('show'); }));
 </script>
 </body>
 </html>
