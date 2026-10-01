@@ -1123,6 +1123,11 @@ function debouncedRealtimeReload(){
   if(realtimeReloadTimer) clearTimeout(realtimeReloadTimer);
   realtimeReloadTimer = setTimeout(() => { loadAll(); }, 600);
 }
+let schedulesReloadTimer = null;
+function debouncedSchedulesReload(){
+  if(schedulesReloadTimer) clearTimeout(schedulesReloadTimer);
+  schedulesReloadTimer = setTimeout(async () => { if($('schedulesOverlay').classList.contains('show')){ await loadSchedules(); renderSchedules(); } }, 600);
+}
 function setLiveStatus(status){
   const dot = $('liveDot'), text = $('liveText');
   $('liveIndicator').style.display = 'flex';
@@ -1146,6 +1151,9 @@ function subscribeRealtime(){
     .on('postgres_changes', { event: '*', schema: 'public', table: 'order_postponements', filter }, debouncedRealtimeReload)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_registry', filter }, debouncedRealtimeReload)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'bin_warehouse_log', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'bin_leakage_acks', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'customer_leakage_acks', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'order_schedules', filter }, debouncedSchedulesReload)
     .on('presence', { event: 'sync' }, renderPresence)
     .on('presence', { event: 'join' }, renderPresence)
     .on('presence', { event: 'leave' }, renderPresence)
