@@ -982,7 +982,7 @@ function fmtDateTime(ts){ if(!ts) return '—'; const d=new Date(ts); return d.t
 function clientName(id){ const c=CLIENTS.find(x=>x.id===id); return c?c.name:'—'; }
 function siteName(id){ const s=SITES.find(x=>x.id===id); return s?s.site_name:'—'; }
 function entityName(id){ const e=ENTITIES.find(x=>x.id===id); return e?e.name:'—'; }
-function todayISO(){ return new Date().toISOString().slice(0,10); }
+function todayISO(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
 function actionLabel(a){ return a==='deploy'?'Bin Out':a==='collect'?'Bin In':a==='exchange'?'Exchange':a==='loose'?'Loose':'—'; }
 function binTrips(){ return TRIPS.filter(t => t.action!=='loose' && t.bin_number); }
 function isMaster(){ return CURRENT_USER && CURRENT_USER.role === 'admin'; }
@@ -2918,7 +2918,7 @@ $('saveAssignOrder').addEventListener('click', async () => {
     if(e1){ console.error(e1); toast('Failed to log the returning bin — check console'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
     const { data: deployData, error: e2 } = await sb.from('trip_log').insert(deployPayload).select().single();
     if(e2){ console.error(e2); toast('Returning bin logged, but new bin failed — check console and complete manually'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
-    const { error: orderErr } = await sb.from('orders').update({ status:'completed', completed_trip_id: deployData.id, updated_at: new Date().toISOString() }).eq('id', o.id);
+    const { error: orderErr } = await sb.from('orders').update({ status:'completed', completed_trip_id: deployData.id, completed_collect_trip_id: collectData.id, updated_at: new Date().toISOString() }).eq('id', o.id);
     if(orderErr){ console.error(orderErr); toast('Trips created but failed to close order — check console'); saveBtn.disabled=false; saveBtn.textContent='Dispatch & complete'; return; }
     await logAudit('dispatch_order_exchange', clientName(o.client_id), `Exchanged bin ${oldBin} → ${newBin}, driver ${driver||'—'}`);
     toast('Exchange dispatched and completed');
