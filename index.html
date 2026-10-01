@@ -337,6 +337,9 @@
         <tbody id="logBody"></tbody>
       </table>
     </div>
+    <div id="loadOlderWrap" style="display:none; text-align:center; margin-top:10px;">
+      <button class="btn-ghost" id="loadOlderBtn" type="button" style="font-size:12px;">Load older trips (30 more days)</button>
+    </div>
   </div>
 
   <div class="view" id="view-bins">
@@ -966,6 +969,13 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $ = (id) => document.getElementById(id);
 
 let ENTITIES = [], CLIENTS = [], SITES = [], TRIPS = [], AUDIT = [], STAFF = [], MAINTENANCE = [], LORRY_REGISTRY = [];
+// Windowed trip loading: TRIPS holds trips from TRIPS_FROM onward; bin/customer status comes from server views over the full history
+const TRIP_WINDOW_DAYS = 30;
+let TRIPS_FROM = null;            // ISO date of the oldest trip currently loaded into TRIPS
+let BIN_LATEST = [], BIN_PREV = []; // latest / previous non-loose trip per bin (v_bin_trip_rank)
+let BIN_LAST_LOOSE = {};          // bin_number -> last loose trip date (v_bin_last_loose)
+let CUSTOMER_LAST = {};           // client_id -> last trip date (v_customer_last_trip)
+let TRIP_COUNTS = { total:0, today:0, unreviewed:0 }; // v_entity_trip_counts
 let ORDERS = [], ORDER_POSTPONEMENTS = [], WAREHOUSE_LOCATIONS = [], WAREHOUSE_LOG = [];
 let filterMStatus = 'all', editingMaintenanceId = null;
 let pendingPhotoFile = null, existingPhotoUrl = null, removeExistingPhoto = false;
@@ -982,9 +992,57 @@ function fmtDateTime(ts){ if(!ts) return '—'; const d=new Date(ts); return d.t
 function clientName(id){ const c=CLIENTS.find(x=>x.id===id); return c?c.name:'—'; }
 function siteName(id){ const s=SITES.find(x=>x.id===id); return s?s.site_name:'—'; }
 function entityName(id){ const e=ENTITIES.find(x=>x.id===id); return e?e.name:'—'; }
-function todayISO(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function localISO(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function todayISO(){ return localISO(new Date()); }
+function daysAgoISO(n){ const d=new Date(); d.setDate(d.getDate()-n); return localISO(d); }
+function findTrip(id){ return TRIPS.find(t=>t.id===id) || BIN_LATEST.find(t=>t.id===id) || BIN_PREV.find(t=>t.id===id) || null; }
+// Fetch trips for a date range in 1,000-row pages (PostgREST caps a single response at 1,000 rows)
+async function fetchTripsRange(fromISO, toISO){
+  const PAGE = 1000; let out = [], offset = 0;
+  while(true){
+    let q = sb.from('trip_log').select('*').eq('entity_id', ACTIVE_ENTITY_ID);
+    if(fromISO) q = q.gte('trip_date', fromISO);
+    if(toISO) q = q.lte('trip_date', toISO);
+    const { data, error } = await q.order('trip_date', {ascending:false}).order('created_at', {ascending:false}).range(offset, offset+PAGE-1);
+    if(error) return { data:null, error };
+    out = out.concat(data||[]);
+    if(!data || data.length < PAGE) break;
+    offset += PAGE;
+  }
+  return { data: out, error: null };
+}
+// Server-side views over the full trip history (bin status, customer activity, counters)
+async function loadTripViews(){
+  const [rank, loose, cust, counts] = await Promise.all([
+    sb.from('v_bin_trip_rank').select('*').eq('entity_id', ACTIVE_ENTITY_ID).lte('rnk', 2),
+    sb.from('v_bin_last_loose').select('bin_number,last_loose_date').eq('entity_id', ACTIVE_ENTITY_ID),
+    sb.from('v_customer_last_trip').select('client_id,last_trip_date').eq('entity_id', ACTIVE_ENTITY_ID),
+    sb.from('v_entity_trip_counts').select('total,today,unreviewed').eq('entity_id', ACTIVE_ENTITY_ID).maybeSingle()
+  ]);
+  if(rank.error||loose.error||cust.error||counts.error){ console.error(rank.error,loose.error,cust.error,counts.error); return false; }
+  BIN_LATEST = (rank.data||[]).filter(r=>r.rnk===1);
+  BIN_PREV = (rank.data||[]).filter(r=>r.rnk===2);
+  BIN_LAST_LOOSE = {}; (loose.data||[]).forEach(r => { BIN_LAST_LOOSE[r.bin_number] = r.last_loose_date; });
+  CUSTOMER_LAST = {}; (cust.data||[]).forEach(r => { CUSTOMER_LAST[r.client_id] = r.last_trip_date; });
+  TRIP_COUNTS = counts.data || { total:0, today:0, unreviewed:0 };
+  return true;
+}
+// Pull older trips into TRIPS so a date filter / "Load older" shows history beyond the window
+async function extendTripWindow(fromISO){
+  if(!fromISO || !TRIPS_FROM || fromISO >= TRIPS_FROM) return false;
+  const prevDay = new Date(TRIPS_FROM+'T00:00:00'); prevDay.setDate(prevDay.getDate()-1);
+  const { data, error } = await fetchTripsRange(fromISO, localISO(prevDay));
+  if(error){ console.error(error); toast('Failed to load older trips — check console'); return false; }
+  const have = new Set(TRIPS.map(t=>t.id));
+  TRIPS = TRIPS.concat((data||[]).filter(t=>!have.has(t.id)));
+  TRIPS_FROM = fromISO;
+  return true;
+}
+async function ensureWindowCovers(fromISO){
+  if(fromISO && TRIPS_FROM && fromISO < TRIPS_FROM){ const ok = await extendTripWindow(fromISO); if(ok) populateFilterSelects(); }
+}
 function actionLabel(a){ return a==='deploy'?'Bin Out':a==='collect'?'Bin In':a==='exchange'?'Exchange':a==='loose'?'Loose':'—'; }
-function binTrips(){ return TRIPS.filter(t => t.action!=='loose' && t.bin_number); }
+function binTrips(){ return BIN_LATEST; } // one row per bin: its latest non-loose trip across full history
 function isMaster(){ return CURRENT_USER && CURRENT_USER.role === 'admin'; }
 function isMaker(){ return CURRENT_USER && CURRENT_USER.role === 'maker'; }
 function isChecker(){ return CURRENT_USER && CURRENT_USER.role === 'checker'; }
@@ -1119,6 +1177,21 @@ function startHeartbeat(){
 // ===== Live dashboard sync (Supabase Realtime) =====
 let realtimeChannel = null;
 let realtimeReloadTimer = null;
+// Incremental trip sync: patch the one row into TRIPS, then refresh the small server views — no full reload
+let tripViewsTimer = null;
+function onTripChange(payload){
+  const row = payload.new && payload.new.id ? payload.new : null;
+  const oldId = payload.old && payload.old.id ? payload.old.id : null;
+  if(payload.eventType === 'DELETE'){
+    if(oldId){ TRIPS = TRIPS.filter(t=>t.id!==oldId); selectedTripIds.delete(oldId); }
+  } else if(row){
+    const i = TRIPS.findIndex(t=>t.id===row.id);          // upsert by id: tolerates an UPDATE arriving before its INSERT
+    if(i >= 0) TRIPS[i] = row;
+    else if(!TRIPS_FROM || row.trip_date >= TRIPS_FROM){ TRIPS.push(row); TRIPS.sort((a,b)=> b.trip_date.localeCompare(a.trip_date) || b.created_at.localeCompare(a.created_at)); }
+  }
+  if(tripViewsTimer) clearTimeout(tripViewsTimer);
+  tripViewsTimer = setTimeout(async () => { await loadTripViews(); await renderAllViews(); }, 600);
+}
 function debouncedRealtimeReload(){
   if(realtimeReloadTimer) clearTimeout(realtimeReloadTimer);
   realtimeReloadTimer = setTimeout(() => { loadAll(); }, 600);
@@ -1141,7 +1214,7 @@ function subscribeRealtime(){
   setLiveStatus('connecting');
   const filter = `entity_id=eq.${ACTIVE_ENTITY_ID}`;
   realtimeChannel = sb.channel('entity-sync-' + ACTIVE_ENTITY_ID)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'trip_log', filter }, debouncedRealtimeReload)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'trip_log', filter }, onTripChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'logistics_clients', filter }, debouncedRealtimeReload)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'logistics_sites', filter }, debouncedRealtimeReload)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'bin_maintenance', filter }, debouncedRealtimeReload)
@@ -1299,7 +1372,7 @@ async function loadAll(){
   const queries = [
     sb.from('logistics_clients').select('id,name,contact_name,contact_phone').eq('entity_id', ACTIVE_ENTITY_ID).order('name'),
     sb.from('logistics_sites').select('id,client_id,site_name,city,state').eq('entity_id', ACTIVE_ENTITY_ID),
-    sb.from('trip_log').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('trip_date', {ascending:false}).order('created_at', {ascending:false}),
+    fetchTripsRange(TRIPS_FROM && TRIPS_FROM < daysAgoISO(TRIP_WINDOW_DAYS) ? TRIPS_FROM : daysAgoISO(TRIP_WINDOW_DAYS), null),
     sb.from('bin_maintenance').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('sent_date', {ascending:false}).order('created_at', {ascending:false}),
     sb.from('lorry_registry').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('lorry_number'),
     sb.from('orders').select('*').eq('entity_id', ACTIVE_ENTITY_ID).order('target_date'),
@@ -1313,8 +1386,13 @@ async function loadAll(){
          {data: ord, error: oe}, {data: pp, error: pe}, {data: whLocs, error: we}, {data: whLog, error: wle}] = results;
   if(ce||se||te||me||le||oe||pe||we||wle){ console.error(ce,se,te,me,le,oe,pe,we,wle); toast('Error loading data — check console'); return; }
   CLIENTS = clients||[]; SITES = sites||[]; TRIPS = trips||[]; MAINTENANCE = maint||[]; LORRY_REGISTRY = lorries||[];
+  TRIPS_FROM = TRIPS_FROM && TRIPS_FROM < daysAgoISO(TRIP_WINDOW_DAYS) ? TRIPS_FROM : daysAgoISO(TRIP_WINDOW_DAYS);
   ORDERS = ord||[]; ORDER_POSTPONEMENTS = pp||[]; WAREHOUSE_LOCATIONS = whLocs||[]; WAREHOUSE_LOG = whLog||[];
   if(canSeeAudit()){ const ares = results[9]; if(ares.error){ console.error(ares.error); } AUDIT = ares.data||[]; }
+  if(!(await loadTripViews())){ toast('Error loading bin status — check console'); }
+  await renderAllViews();
+}
+async function renderAllViews(){
   populateFilterSelects();
   renderLog();
   renderAlertsWidget();
@@ -1369,9 +1447,9 @@ function getFilteredRows(){
   });
 }
 
-function applyDatePreset(preset){
+async function applyDatePreset(preset){
   const now = new Date();
-  const iso = (d) => d.toISOString().slice(0,10);
+  const iso = (d) => localISO(d);
   let from, to;
   if(preset === 'today'){ from = to = iso(now); }
   else if(preset === 'week'){
@@ -1385,6 +1463,7 @@ function applyDatePreset(preset){
     to = iso(new Date(now.getFullYear(), now.getMonth(), 0));
   }
   $('filt-date-from').value = from; $('filt-date-to').value = to;
+  await ensureWindowCovers(from);
   renderLog();
 }
 $('filt-date-preset').addEventListener('change', () => {
@@ -1402,13 +1481,15 @@ function renderLog(){
   const showBulk = canReviewToggle();
   $('selectAllTh').style.display = showBulk ? 'table-cell' : 'none';
 
-  const todayCount = TRIPS.filter(t => t.trip_date === todayISO()).length;
+  const todayCount = TRIP_COUNTS.today || 0;
   const summary = $('tripCountSummary');
   summary.style.display = 'block';
   const filtersActive = $('filt-date-from').value || $('filt-date-to').value || $('filt-driver').value || $('filt-client').value || $('filt-site').value || $('filt-lorry').value || $('filt-bin').value || $('filt-search').value || filterAction !== 'all';
+  const windowNote = `<span style="opacity:0.8;"> · showing since ${fmtDate(TRIPS_FROM)}</span>`;
   summary.innerHTML = filtersActive
-    ? `<b>${rows.length}</b> trip(s) shown with current filters · <b>${todayCount}</b> trip(s) logged today`
-    : `<b>${rows.length}</b> trip(s) total · <b>${todayCount}</b> trip(s) logged today`;
+    ? `<b>${rows.length}</b> trip(s) shown with current filters · <b>${todayCount}</b> trip(s) logged today${windowNote}`
+    : `<b>${rows.length}</b> trip(s) loaded · <b>${TRIP_COUNTS.total||0}</b> total · <b>${todayCount}</b> trip(s) logged today${windowNote}`;
+  $('loadOlderWrap').style.display = (TRIP_COUNTS.total||0) > TRIPS.length ? 'block' : 'none';
 
   if(rows.length === 0){ body.innerHTML = `<tr><td colspan="12"><div class="empty-state">No trips match these filters</div></td></tr>`; updateBulkBar(); return; }
   body.innerHTML = rows.map(t => {
@@ -1506,7 +1587,15 @@ $('bulkMarkReviewed').addEventListener('click', async () => {
   await loadAll();
 });
 
-['filt-date-from','filt-date-to','filt-driver','filt-client','filt-site'].forEach(id => $(id).addEventListener('change', renderLog));
+['filt-driver','filt-client','filt-site','filt-date-to'].forEach(id => $(id).addEventListener('change', renderLog));
+$('filt-date-from').addEventListener('change', async () => { await ensureWindowCovers($('filt-date-from').value); renderLog(); });
+$('loadOlderBtn').addEventListener('click', async () => {
+  const btn = $('loadOlderBtn'); btn.disabled = true; btn.textContent = 'Loading…';
+  try {
+    const d = new Date(TRIPS_FROM+'T00:00:00'); d.setDate(d.getDate()-TRIP_WINDOW_DAYS);
+    await extendTripWindow(localISO(d)); populateFilterSelects(); renderLog();
+  } finally { btn.disabled = false; btn.textContent = 'Load older trips (30 more days)'; }
+});
 ['filt-lorry','filt-bin'].forEach(id => $(id).addEventListener('input', renderLog));
 document.querySelectorAll('[data-action]').forEach(chip => {
   chip.addEventListener('click', () => {
@@ -2104,9 +2193,7 @@ function lastCustomerAckFor(clientId){
   return CUSTOMER_LEAKAGE_ACKS.find(a => a.client_id === clientId);
 }
 function customerLastOrder(clientId){
-  const trips = TRIPS.filter(t=>t.client_id===clientId);
-  if(trips.length===0) return null;
-  return trips.reduce((max,t) => t.trip_date > max ? t.trip_date : max, trips[0].trip_date);
+  return CUSTOMER_LAST[clientId] || null; // from v_customer_last_trip — full history, not just the loaded window
 }
 
 function renderCustomers(){
@@ -2516,7 +2603,7 @@ function renderOrders(){
       <td>${fmtDateTime(o.created_at)}</td>
       <td>${clientName(o.client_id)}</td>
       <td>${siteName(o.site_id)}</td>
-      <td><span class="pill ${o.action==='exchange'?'':o.action}" style="${o.action==='exchange'?'color:var(--violet); background:rgba(139,127,209,0.15);':''}">${actionLabel(o.action)}</span>${o.linked_trip_id ? `<div style="font-size:10px; color:var(--text-dim); margin-top:2px;">🔗 ${(TRIPS.find(t=>t.id===o.linked_trip_id)||{}).bin_number||'—'}</div>` : ''}</td>
+      <td><span class="pill ${o.action==='exchange'?'':o.action}" style="${o.action==='exchange'?'color:var(--violet); background:rgba(139,127,209,0.15);':''}">${actionLabel(o.action)}</span>${o.linked_trip_id ? `<div style="font-size:10px; color:var(--text-dim); margin-top:2px;">🔗 ${(findTrip(o.linked_trip_id)||{}).bin_number||'—'}</div>` : ''}</td>
       <td><span class="waste-dot ${o.waste_type}"></span>${o.waste_type}</td>
       <td>${o.postpone_count>0 ? `${o.postpone_count}x` : '—'}</td>
       <td>${o.notes||'—'}</td>
@@ -2599,7 +2686,7 @@ $('o-site').addEventListener('change', refreshOrderLinkBinField);
 $('o-linkbin').addEventListener('change', () => {
   const tripId = $('o-linkbin').value;
   if(!tripId) return;
-  const trip = TRIPS.find(t=>t.id===tripId);
+  const trip = findTrip(tripId);
   if(trip){
     orderWasteSel = trip.waste_type;
     document.querySelectorAll('#o-waste .waste-opt').forEach(x=>x.classList.toggle('sel', x.dataset.v===trip.waste_type));
@@ -2625,7 +2712,7 @@ function renderQuickBinDropdown(rawText){
   dd.style.display='block';
   dd.querySelectorAll('.combo-item').forEach(item => {
     item.addEventListener('click', () => {
-      const trip = TRIPS.find(t=>t.id===item.dataset.tripid);
+      const trip = findTrip(item.dataset.tripid);
       if(!trip) return;
       $('o-quickbin-search').value = trip.bin_number;
       dd.style.display = 'none';
@@ -2698,7 +2785,7 @@ $('saveOrder').addEventListener('click', async () => {
   if(!editingOrderId && linkedTripId){
     const existing = ORDERS.find(o => o.status==='pending' && o.linked_trip_id===linkedTripId);
     if(existing){
-      const binNum = (TRIPS.find(t=>t.id===linkedTripId)||{}).bin_number || 'this bin';
+      const binNum = (findTrip(linkedTripId)||{}).bin_number || 'this bin';
       const ok = confirm(`There's already a pending order to collect ${binNum} — taken by ${existing.taken_by||'someone'} on ${fmtDateTime(existing.created_at)}.\n\nCreate another order for the same bin anyway?`);
       if(!ok){ return; }
     }
@@ -2834,7 +2921,7 @@ function openAssignOrderModal(orderId){
     ? `${clientName(o.client_id)} — ${siteName(o.site_id)} — Loose (${o.waste_type}). Bin travels with the lorry and is not left at site.`
     : `${clientName(o.client_id)} — ${siteName(o.site_id)} — ${actionLabel(o.action)} (${o.waste_type})`;
   $('ao-lorry').value=''; $('ao-driver').value=''; $('ao-newbin').value=''; $('ao-photo').value='';
-  const linkedTrip = o.linked_trip_id ? TRIPS.find(t=>t.id===o.linked_trip_id) : null;
+  const linkedTrip = o.linked_trip_id ? findTrip(o.linked_trip_id) : null;
 
   if(isLoose){
     $('ao-bin-field').style.display = 'block';
@@ -3168,8 +3255,8 @@ function latestWarehouseEntryFor(binNumber){
 }
 function warehouseIdleDays(w){
   // A bin taken out on loose trips is being used, even though it's never "deployed" — count that as activity
-  const lastLoose = TRIPS.filter(t=>t.action==='loose' && t.bin_number===w.bin_number && t.trip_date>=w.received_date)
-                         .reduce((m,t)=> t.trip_date>m ? t.trip_date : m, w.received_date);
+  const lastLooseDate = BIN_LAST_LOOSE[w.bin_number];
+  const lastLoose = (lastLooseDate && lastLooseDate >= w.received_date) ? lastLooseDate : w.received_date;
   return daysSince(lastLoose);
 }
 function currentWarehouseBins(){
@@ -3520,24 +3607,23 @@ document.querySelectorAll('[data-insight-period]').forEach(chip => {
   });
 });
 
-function insightsFilteredTrips(){
-  if(insightPeriod === 'all') return TRIPS;
-  const days = parseInt(insightPeriod, 10);
-  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
-  const cutoffStr = cutoff.toISOString().slice(0,10);
-  return TRIPS.filter(t => t.trip_date >= cutoffStr);
+async function fetchInsightsSummary(){
+  const from = insightPeriod === 'all' ? '1900-01-01' : daysAgoISO(parseInt(insightPeriod, 10));
+  const { data, error } = await sb.rpc('logistics_insights_summary', { p_entity_id: ACTIVE_ENTITY_ID, p_from: from, p_to: todayISO() });
+  if(error){ console.error(error); toast('Failed to load insights — check console'); return null; }
+  return data;
 }
 
-function renderInsights(){
+let insightsRenderSeq = 0;
+async function renderInsights(){
   if(typeof Chart === 'undefined') return;
-  const rows = insightsFilteredTrips();
+  const seq = ++insightsRenderSeq;
+  const sum = await fetchInsightsSummary(); // aggregated server-side over the full history for the chosen period
+  if(!sum || seq !== insightsRenderSeq) return;
 
   // --- Trip volume over time (daily counts) ---
-  const dayCounts = {};
-  rows.forEach(t => { dayCounts[t.trip_date] = (dayCounts[t.trip_date]||0) + 1; });
-  const sortedDays = Object.keys(dayCounts).sort();
-  const volLabels = sortedDays.map(d => fmtDate(d));
-  const volData = sortedDays.map(d => dayCounts[d]);
+  const volLabels = sum.by_day.map(x => fmtDate(x.d));
+  const volData = sum.by_day.map(x => x.n);
 
   if(chartVolume) chartVolume.destroy();
   chartVolume = new Chart($('chartVolume'), {
@@ -3547,8 +3633,7 @@ function renderInsights(){
   });
 
   // --- Waste type mix ---
-  const wasteCounts = { carton:0, plastic:0, metal:0, general:0 };
-  rows.forEach(t => { if(wasteCounts[t.waste_type]!==undefined) wasteCounts[t.waste_type]++; });
+  const wasteCounts = { carton: sum.by_waste.carton||0, plastic: sum.by_waste.plastic||0, metal: sum.by_waste.metal||0, general: sum.by_waste.general||0 };
   if(chartWaste) chartWaste.destroy();
   chartWaste = new Chart($('chartWaste'), {
     type: 'doughnut',
@@ -3561,9 +3646,7 @@ function renderInsights(){
   });
 
   // --- Top customers by volume ---
-  const custCounts = {};
-  rows.forEach(t => { custCounts[t.client_id] = (custCounts[t.client_id]||0) + 1; });
-  const topCust = Object.entries(custCounts).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const topCust = sum.top_customers.map(x => [x.client_id, x.n]);
   if(chartCustomers) chartCustomers.destroy();
   chartCustomers = new Chart($('chartCustomers'), {
     type: 'bar',
@@ -3572,9 +3655,7 @@ function renderInsights(){
   });
 
   // --- Driver leaderboard ---
-  const driverCounts = {};
-  rows.forEach(t => { const d = t.driver_name || 'Unassigned'; driverCounts[d] = (driverCounts[d]||0) + 1; });
-  const topDrivers = Object.entries(driverCounts).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const topDrivers = sum.drivers.map(x => [x.driver, x.n]);
   if(chartDrivers) chartDrivers.destroy();
   chartDrivers = new Chart($('chartDrivers'), {
     type: 'bar',
@@ -3584,16 +3665,20 @@ function renderInsights(){
 }
 
 // ===== Customer Trace =====
-function openCustomerTraceModal(customerId){
+async function openCustomerTraceModal(customerId){
   const c = CLIENTS.find(x=>x.id===customerId);
   if(!c) return;
   $('customerTraceTitle').textContent = `Trace — ${c.name}`;
+  $('customerTraceBody').innerHTML = '<div class="loading">Loading history…</div>';
+  $('customerTraceOverlay').classList.add('show');
   const sites = SITES.filter(s=>s.client_id===customerId);
-  const trips = TRIPS.filter(t=>t.client_id===customerId).sort((a,b)=>b.trip_date.localeCompare(a.trip_date));
-
-  const byBin = {};
-  trips.filter(t=>t.action!=='loose' && t.bin_number).forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
-  const currentBins = Object.values(byBin).filter(b=>b.action==='deploy');
+  // Full history for this one customer, fetched on demand (not limited to the loaded window)
+  const { data: tripData, error: tripErr } = await sb.from('trip_log').select('*').eq('entity_id', ACTIVE_ENTITY_ID).eq('client_id', customerId)
+    .order('trip_date', {ascending:false}).order('created_at', {ascending:false}).limit(1000);
+  if(tripErr){ console.error(tripErr); $('customerTraceBody').innerHTML = '<div class="empty-state" style="padding:14px;">Failed to load history — check console</div>'; return; }
+  const trips = tripData || [];
+  // Bins currently out at this customer: the bin's latest trip (across all history) is a deploy here
+  const currentBins = BIN_LATEST.filter(b => b.action==='deploy' && b.client_id===customerId);
 
   const branchesHtml = sites.length
     ? sites.map(s=>`<span class="pill role-checker">${s.site_name}${s.city?' — '+s.city:''}</span>`).join(' ')
@@ -3607,7 +3692,7 @@ function openCustomerTraceModal(customerId){
     ? `<div class="table-wrap" style="max-height:260px; overflow-y:auto;"><table>
         <thead><tr><th>Date</th><th>Site</th><th>Bin</th><th>Action</th><th>Driver</th></tr></thead>
         <tbody>${trips.slice(0,50).map(t=>`<tr><td>${fmtDate(t.trip_date)}</td><td>${siteName(t.site_id)}</td><td>${t.bin_number||'—'}</td><td><span class="pill ${t.action}">${actionLabel(t.action)}</span></td><td>${t.driver_name||'—'}</td></tr>`).join('')}</tbody>
-      </table></div>${trips.length>50?`<div style="font-size:11px;color:var(--text-dim);margin-top:6px;">Showing most recent 50 of ${trips.length} trips</div>`:''}`
+      </table></div>${trips.length>50?`<div style="font-size:11px;color:var(--text-dim);margin-top:6px;">Showing most recent 50 of ${trips.length}${trips.length>=1000?'+':''} trips</div>`:''}`
     : '<div class="empty-state" style="padding:14px;">No trip history yet</div>';
 
   $('customerTraceBody').innerHTML = `
@@ -3618,10 +3703,9 @@ function openCustomerTraceModal(customerId){
     <div style="margin-bottom:18px;">${branchesHtml}</div>
     <h3 style="font-size:13px; margin-bottom:8px;">Currently out (${currentBins.length})</h3>
     <div style="margin-bottom:18px;">${currentBinsHtml}</div>
-    <h3 style="font-size:13px; margin-bottom:8px;">Trip history (${trips.length})</h3>
+    <h3 style="font-size:13px; margin-bottom:8px;">Trip history (${trips.length}${trips.length>=1000?'+':''})</h3>
     ${tripsHtml}
   `;
-  $('customerTraceOverlay').classList.add('show');
 }
 $('closeCustomerTrace').addEventListener('click', () => $('customerTraceOverlay').classList.remove('show'));
 $('closeCustomerTrace2').addEventListener('click', () => $('customerTraceOverlay').classList.remove('show'));
@@ -3639,7 +3723,7 @@ function renderAlertsWidget(){
   binTrips().forEach(t => { const k=t.bin_number; if(!byBin[k] || t.trip_date>byBin[k].trip_date || (t.trip_date===byBin[k].trip_date && t.created_at>byBin[k].created_at)) byBin[k]=t; });
   const leakingCount = Object.values(byBin).filter(b=>b.action==='deploy' && daysSince(b.trip_date)>=LEAKAGE_THRESHOLD_DAYS).length;
   const overdueRepairs = MAINTENANCE.filter(m=>m.status==='in_repair' && daysSince(m.sent_date)>=14).length;
-  const unreviewedCount = TRIPS.filter(t=>!t.reviewed).length;
+  const unreviewedCount = TRIP_COUNTS.unreviewed || 0;
   const inactiveCustCount = CLIENTS.filter(c => {
     const lastOrder = customerLastOrder(c.id);
     const days = lastOrder ? daysSince(lastOrder) : daysSince((c.created_at||'').slice(0,10));
@@ -4003,12 +4087,12 @@ function runCopilotQuery(rawQuery){
   if(dateRange) descBits.push(dateRange.label);
   const desc = descBits.join(' ');
 
-  if(rows.length===0) return { summary: `No ${desc} found.` };
+  if(rows.length===0) return { summary: `No ${desc} found <span style="color:var(--text-dim); font-size:11px;">(in trips loaded since ${fmtDate(TRIPS_FROM)})</span>.` };
   if(wantCount) return { summary: `<span class="cp-count">${rows.length}</span> ${desc}.` };
 
   rows.sort((a,b) => b.trip_date.localeCompare(a.trip_date));
   return {
-    summary: `${rows.length} ${desc}${rows.length>25?' (showing first 25)':''}:`,
+    summary: `${rows.length} ${desc}${rows.length>25?' (showing first 25)':''} <span style="color:var(--text-dim); font-size:11px;">— searching trips loaded since ${fmtDate(TRIPS_FROM)}</span>:`,
     columns: ['Date','Customer','Site','Bin No.','Driver','Waste','Action','Reviewed'],
     rows: rows.slice(0,25).map(t=>[fmtDate(t.trip_date), clientName(t.client_id), siteName(t.site_id), t.bin_number||'—', t.driver_name||'—', t.waste_type, actionLabel(t.action), t.reviewed?'Yes':'No'])
   };
@@ -4174,7 +4258,7 @@ $('openNew').addEventListener('click', () => {
 
 function openTripModal(tripId){
   if(!canEdit()){ toast('You do not have permission to edit trips'); return; }
-  const t = TRIPS.find(x=>x.id===tripId);
+  const t = findTrip(tripId);
   if(!t) return;
   editingTripId = tripId;
   $('tripModalTitle').textContent = 'Edit trip entry';
@@ -4211,13 +4295,9 @@ $('closeTrip').addEventListener('click', () => $('tripOverlay').classList.remove
 $('cancelTrip').addEventListener('click', () => $('tripOverlay').classList.remove('show'));
 
 function getLatestTripForBin(binNumber, excludeTripId){
-  const matches = TRIPS.filter(t => t.action!=='loose' && t.bin_number === binNumber && t.id !== excludeTripId);
-  if(matches.length === 0) return null;
-  return matches.reduce((latest, t) => {
-    if(!latest) return t;
-    if(t.trip_date > latest.trip_date || (t.trip_date===latest.trip_date && t.created_at>latest.created_at)) return t;
-    return latest;
-  }, null);
+  const latest = BIN_LATEST.find(t => t.bin_number === binNumber) || null;
+  if(latest && excludeTripId && latest.id === excludeTripId) return BIN_PREV.find(t => t.bin_number === binNumber) || null;
+  return latest;
 }
 
 function updateBinStatusHint(){
